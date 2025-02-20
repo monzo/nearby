@@ -45,6 +45,7 @@ cc_library(
         "byte_array.h",
         "callable.h",
         "exception.h",
+        "expected.h",
         "feature_flags.h",
         "input_stream.h",
         "listeners.h",
@@ -81,12 +82,14 @@ cc_library(
 cc_library(
     name = "util",
     srcs = [
-        "base_input_stream.cc",
         "byte_utils.cc",
+        "stream_reader.cc",
+        "stream_writer.cc",
     ],
     hdrs = [
-        "base_input_stream.h",
         "byte_utils.h",
+        "stream_reader.h",
+        "stream_writer.h",
     ],
     visibility = [
         "//connections:__subpackages__",
@@ -149,7 +152,6 @@ cc_library(
     ],
     visibility = [
         "//connections/implementation:__subpackages__",
-        "//fastpair:__subpackages__",
         "//internal/platform/implementation:__subpackages__",
         "//presence:__subpackages__",
     ],
@@ -244,19 +246,16 @@ cc_library(
     ],
     visibility = [
         "//connections:__subpackages__",
-        "//fastpair:__subpackages__",
         "//internal/account:__subpackages__",
         "//internal/auth:__subpackages__",
         "//internal/auth/credential_store:__subpackages__",
         "//internal/base:__subpackages__",
         "//internal/crypto:__subpackages__",
         "//internal/data:__subpackages__",
-        "//internal/flags:__subpackages__",
         "//internal/interop:__pkg__",
         "//internal/network:__subpackages__",
         "//internal/platform:__subpackages__",
         "//internal/platform/implementation/g3:__pkg__",
-        "//internal/platform/implementation/windows:__subpackages__",
         "//internal/preferences:__subpackages__",
         "//internal/proto/analytics:__subpackages__",
         "//internal/test:__subpackages__",
@@ -271,6 +270,7 @@ cc_library(
     deps = [
         ":base",
         ":util",
+        "//connections/implementation/flags:connections_flags",
         "//internal/base:files",
         "//internal/crypto_cros",
         "//internal/flags:nearby_flags",
@@ -320,7 +320,6 @@ cc_library(
     ],
     visibility = [
         "//connections:__subpackages__",
-        "//fastpair:__subpackages__",
         "//internal/platform/implementation:__subpackages__",
         "//internal/test:__subpackages__",
         "//presence:__subpackages__",
@@ -355,7 +354,6 @@ cc_library(
     ],
     visibility = [
         "//connections:__subpackages__",
-        "//fastpair:__subpackages__",
         "//internal/platform/implementation:__subpackages__",
         "//presence:__subpackages__",
     ],
@@ -392,6 +390,7 @@ cc_test(
         "//internal/platform/implementation/g3",  # build_cleaner: keep
         "@com_github_protobuf_matchers//protobuf-matchers",
         "@com_google_absl//absl/hash:hash_testing",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/synchronization",
         "@com_google_googletest//:gtest_main",
     ],
@@ -401,11 +400,14 @@ cc_test(
     name = "platform_util_test",
     srcs = [
         "byte_utils_test.cc",
+        "stream_reader_test.cc",
+        "stream_writer_test.cc",
     ],
     deps = [
         ":base",
         ":util",
         "@com_github_protobuf_matchers//protobuf-matchers",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -420,6 +422,17 @@ cc_test(
         ":cancellation_flag",
         ":test_util",
         "//internal/platform/implementation/g3",  # build_cleaner: keep
+        "@com_github_protobuf_matchers//protobuf-matchers",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "expected_test",
+    srcs = ["expected_test.cc"],
+    deps = [
+        ":base",
+        "//proto:connections_enums_cc_proto",
         "@com_github_protobuf_matchers//protobuf-matchers",
         "@com_google_googletest//:gtest_main",
     ],
@@ -447,6 +460,7 @@ cc_test(
         "ble_connection_info_test.cc",
         "ble_test.cc",
         "ble_v2_test.cc",
+        "blocking_queue_stream_test.cc",
         "bluetooth_adapter_test.cc",
         "bluetooth_classic_test.cc",
         "bluetooth_connection_info_test.cc",
@@ -464,6 +478,8 @@ cc_test(
         ":connection_info",
         ":test_util",
         ":types",
+        "//connections/implementation/flags:connections_flags",
+        "//internal/flags:nearby_flags",
         "//internal/platform/implementation:comm",
         "//internal/platform/implementation/g3",  # build_cleaner: keep
         "//proto:connections_enums_cc_proto",
