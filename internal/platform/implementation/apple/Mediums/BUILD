@@ -13,7 +13,10 @@
 # limitations under the License.
 licenses(["notice"])
 
-package(default_visibility = ["//internal/platform/implementation/apple:__subpackages__"])
+package(default_visibility = [
+    "//connections:__subpackages__",
+    "//internal/platform/implementation/apple:__subpackages__",
+])
 
 objc_library(
     name = "Mediums",
@@ -32,12 +35,12 @@ objc_library(
         "GNCLeaks.h",
         "GNCLeaks.m",
         "GNCMConnection.m",
-        "WiFiLAN/GNCIPv4Address.m",
-        "WiFiLAN/GNCWiFiLANError.m",
-        "WiFiLAN/GNCWiFiLANMedium.m",
-        "WiFiLAN/GNCWiFiLANServerSocket.m",
-        "WiFiLAN/GNCWiFiLANServerSocket+Internal.h",
-        "WiFiLAN/GNCWiFiLANSocket.m",
+        "WiFiCommon/GNCIPv4Address.m",
+        "WiFiCommon/GNCNWFramework.m",
+        "WiFiCommon/GNCNWFrameworkError.m",
+        "WiFiCommon/GNCNWFrameworkServerSocket.m",
+        "WiFiCommon/GNCNWFrameworkServerSocket+Internal.h",
+        "WiFiCommon/GNCNWFrameworkSocket.m",
     ],
     hdrs = [
         "BLEv2/GNCBLEError.h",
@@ -52,11 +55,11 @@ objc_library(
         "Ble/GNCMBleConnection.h",
         "Ble/GNCMBleUtils.h",
         "GNCMConnection.h",
-        "WiFiLAN/GNCIPv4Address.h",
-        "WiFiLAN/GNCWiFiLANError.h",
-        "WiFiLAN/GNCWiFiLANMedium.h",
-        "WiFiLAN/GNCWiFiLANServerSocket.h",
-        "WiFiLAN/GNCWiFiLANSocket.h",
+        "WiFiCommon/GNCIPv4Address.h",
+        "WiFiCommon/GNCNWFramework.h",
+        "WiFiCommon/GNCNWFrameworkError.h",
+        "WiFiCommon/GNCNWFrameworkServerSocket.h",
+        "WiFiCommon/GNCNWFrameworkSocket.h",
     ],
     deps = [
         "//internal/platform/implementation/apple:Shared",

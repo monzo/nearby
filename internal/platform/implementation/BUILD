@@ -14,10 +14,29 @@
 licenses(["notice"])
 
 cc_library(
+    name = "auth_status",
+    hdrs = ["auth_status.h"],
+    visibility = [
+        "//internal/auth:__pkg__",
+        "//internal/platform/implementation:__subpackages__",
+        "//location/nearby/cpp/sharing/clients/cpp:__subpackages__",
+    ],
+)
+
+cc_library(
+    name = "account_info",
+    hdrs = ["account_info.h"],
+    visibility = [
+        "//internal/auth:__pkg__",
+        "//internal/platform/implementation:__subpackages__",
+        "//location/nearby/cpp/sharing/clients/cpp:__subpackages__",
+    ],
+)
+
+cc_library(
     name = "account_manager",
     hdrs = ["account_manager.h"],
     visibility = [
-        "//fastpair:__subpackages__",
         "//internal/account:__pkg__",
         "//internal/platform/implementation:__subpackages__",
         "//internal/test:__subpackages__",
@@ -26,8 +45,30 @@ cc_library(
         "//sharing:__subpackages__",
     ],
     deps = [
+        ":account_info",
+        ":signin_attempt",
         "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings:string_view",
+    ],
+)
+
+cc_library(
+    name = "signin_attempt",
+    hdrs = ["signin_attempt.h"],
+    visibility = [
+        "//internal/account:__pkg__",
+        "//internal/auth:__pkg__",
+        "//internal/platform/implementation:__subpackages__",
+        "//internal/test:__subpackages__",
+        "//location/nearby/cpp/sharing/clients/cpp:__subpackages__",
+        "//location/nearby/sharing/sdk/quick_share_server:__pkg__",
+        "//sharing:__subpackages__",
+    ],
+    deps = [
+        ":account_info",
+        ":auth_status",
+        "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/strings:string_view",
     ],
 )
@@ -60,7 +101,6 @@ cc_library(
     visibility = [
         "//connections/implementation:__subpackages__",
         "//connections/implementation/analytics:__subpackages__",
-        "//fastpair:__subpackages__",
         "//internal/crypto_cros:__pkg__",
         "//internal/platform:__pkg__",
         "//internal/platform/implementation:__subpackages__",
@@ -122,7 +162,6 @@ cc_library(
     copts = ["-DNO_WEBRTC"],
     visibility = [
         "//connections/implementation:__subpackages__",
-        "//fastpair/internal/mediums:__pkg__",
         "//internal/network:__subpackages__",
         "//internal/platform:__pkg__",
         "//internal/platform/implementation:__subpackages__",
