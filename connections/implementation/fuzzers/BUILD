@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+
 licenses(["notice"])
 
 cc_test(
@@ -23,10 +25,9 @@ cc_test(
     tags = ["componentid:148515"],
     deps = [
         "//connections/implementation:internal",
-        "//internal/platform:base",
         "//internal/platform/implementation/g3",
-        "//testing/fuzzing:fuzztest",
         "@com_github_protobuf_matchers//protobuf-matchers",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_googletest//:gtest_main",
     ],
 )

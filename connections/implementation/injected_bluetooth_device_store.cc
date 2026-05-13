@@ -14,11 +14,20 @@
 
 #include "connections/implementation/injected_bluetooth_device_store.h"
 
+#include <cstdint>
+#include <memory>
 #include <string>
+#include <utility>
 
+#include "absl/status/statusor.h"
+#include "absl/types/span.h"
 #include "connections/implementation/bluetooth_device_name.h"
+#include "connections/implementation/pcp.h"
+#include "connections/implementation/webrtc_state.h"
+#include "internal/platform/bluetooth_adapter.h"
+#include "internal/platform/byte_array.h"
 #include "internal/platform/implementation/bluetooth_classic.h"
-#include "internal/platform/bluetooth_utils.h"
+#include "internal/platform/mac_address.h"
 
 namespace nearby {
 namespace connections {
@@ -37,7 +46,14 @@ class InjectedBluetoothDevice : public api::BluetoothDevice {
   // api::BluetoothDevice:
   std::string GetName() const override { return name_; }
 
-  std::string GetMacAddress() const override { return mac_address_; }
+  MacAddress GetMacAddress() const override {
+    if (mac_address_.empty()) {
+      return MacAddress();
+    }
+    MacAddress address;
+    MacAddress::FromString(mac_address_, address);
+    return address;
+  }
 
  private:
   const std::string name_;
@@ -54,12 +70,16 @@ BluetoothDevice InjectedBluetoothDeviceStore::CreateInjectedBluetoothDevice(
     const ByteArray& remote_bluetooth_mac_address,
     const std::string& endpoint_id, const ByteArray& endpoint_info,
     const ByteArray& service_id_hash, Pcp pcp) {
-  std::string remote_bluetooth_mac_address_str =
-      BluetoothUtils::ToString(remote_bluetooth_mac_address);
-
   // Valid MAC address is required.
-  if (remote_bluetooth_mac_address_str.empty())
+  MacAddress remote_mac_address;
+  if (!MacAddress::FromBytes(
+          absl::MakeSpan(reinterpret_cast<const uint8_t*>(
+                             remote_bluetooth_mac_address.data()),
+                         remote_bluetooth_mac_address.size()),
+          remote_mac_address) ||
+      !remote_mac_address.IsSet()) {
     return BluetoothDevice(/*device=*/nullptr);
+  }
 
   // Non-empty endpoint info is required.
   if (endpoint_info.Empty()) return BluetoothDevice(/*device=*/nullptr);
@@ -75,13 +95,22 @@ BluetoothDevice InjectedBluetoothDeviceStore::CreateInjectedBluetoothDevice(
   if (!name.IsValid()) return BluetoothDevice(/*device=*/nullptr);
 
   auto injected_device = std::make_unique<InjectedBluetoothDevice>(
-      static_cast<std::string>(name), remote_bluetooth_mac_address_str);
+      static_cast<std::string>(name), remote_mac_address.ToString());
   BluetoothDevice device_to_return(injected_device.get());
 
   // Store underlying device to ensure that it is kept alive for future use.
   devices_.emplace_back(std::move(injected_device));
 
   return device_to_return;
+}
+
+bool InjectedBluetoothDeviceStore::IsInjectedDevice(MacAddress mac_address) {
+  for (const auto& device : devices_) {
+    if (device->GetMacAddress() == mac_address) {
+      return true;
+    }
+  }
+  return false;
 }
 
 }  // namespace connections

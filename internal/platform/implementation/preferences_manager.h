@@ -24,6 +24,7 @@
 #include "absl/time/time.h"
 #include "absl/types/span.h"
 #include "nlohmann/json_fwd.hpp"
+#include "google/protobuf/message.h"
 
 namespace nearby {
 namespace api {
@@ -36,7 +37,7 @@ namespace api {
 // repository, we use json as the parser for now.
 class PreferencesManager {
  public:
-  explicit PreferencesManager(absl::string_view path) {}
+  PreferencesManager() = default;
   virtual ~PreferencesManager() = default;
 
   // Sets values
@@ -58,6 +59,9 @@ class PreferencesManager {
                               absl::Span<const std::string> value) = 0;
 
   virtual bool SetTime(absl::string_view key, absl::Time value) = 0;
+
+  virtual bool SetProtoMessage(absl::string_view key,
+                               const google::protobuf::Message& value) = 0;
 
   // Gets values
   virtual nlohmann::json Get(absl::string_view key,
@@ -83,8 +87,15 @@ class PreferencesManager {
   virtual absl::Time GetTime(absl::string_view key,
                              absl::Time default_value) const = 0;
 
+  virtual bool GetProtoMessage(absl::string_view key,
+                               google::protobuf::Message* value) const = 0;
+
   // Removes preferences
   virtual void Remove(absl::string_view key) = 0;
+
+  // Removes all preferences that start with the given prefix.
+  // Returns false on error.
+  virtual bool RemoveKeyPrefix(absl::string_view prefix) = 0;
 };
 
 }  // namespace api

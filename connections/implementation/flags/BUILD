@@ -1,3 +1,5 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
 # Copyright 2023 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,9 +20,9 @@ cc_library(
     hdrs = [
         "nearby_connections_feature_flags.h",
     ],
+    # Flags should not be visible to external users. Only for internal use.
     visibility = [
         "//connections:__subpackages__",
-        "//googlemac/iPhone/Shared/Identity/SmartSetup:__subpackages__",
         "//internal/platform:__subpackages__",
         "//internal/platform/implementation:__subpackages__",
         "//location/nearby/cpp:__subpackages__",

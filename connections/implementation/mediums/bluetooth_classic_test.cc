@@ -16,6 +16,7 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "gtest/gtest.h"
 #include "absl/strings/string_view.h"
@@ -268,8 +269,8 @@ TEST_P(BluetoothClassicTest, CanConnect) {
           .device_discovered_cb =
               [&latch, &discovered_device](BluetoothDevice& device) {
                 discovered_device = device;
-                NEARBY_LOGS(INFO) << "Discovered device=" << device.GetName()
-                                  << ", impl=" << &device.GetImpl();
+                LOG(INFO) << "Discovered device=" << device.GetName()
+                          << ", impl=" << &device.GetImpl();
                 latch.CountDown();
               },
       }));
@@ -318,8 +319,8 @@ TEST_P(BluetoothClassicTest, CanCancelBeforeConnect) {
       {
           .device_discovered_cb =
               [&latch, &discovered_device](BluetoothDevice& device) {
-                NEARBY_LOGS(INFO) << "Discovered device=" << device.GetName()
-                                  << ", impl=" << &device.GetImpl();
+                LOG(INFO) << "Discovered device=" << device.GetName()
+                          << ", impl=" << &device.GetImpl();
                 discovered_device = device;
                 latch.CountDown();
               },
@@ -386,8 +387,8 @@ TEST_P(BluetoothClassicTest, CanCancelDuringConnect) {
           .device_discovered_cb =
               [&latch, &discovered_device](BluetoothDevice& device) {
                 discovered_device = device;
-                NEARBY_LOGS(INFO) << "Discovered device=" << device.GetName()
-                                  << ", impl=" << &device.GetImpl();
+                LOG(INFO) << "Discovered device=" << device.GetName()
+                          << ", impl=" << &device.GetImpl();
                 latch.CountDown();
               },
       }));
@@ -452,8 +453,8 @@ TEST_P(BluetoothClassicTest, CanCancelDuringConnect_MultipleEndpoints) {
           .device_discovered_cb =
               [&latch, &discovered_device](BluetoothDevice& device) {
                 discovered_device = device;
-                NEARBY_LOGS(INFO) << "Discovered device=" << device.GetName()
-                                  << ", impl=" << &device.GetImpl();
+                LOG(INFO) << "Discovered device=" << device.GetName()
+                          << ", impl=" << &device.GetImpl();
                 latch.CountDown();
               },
       }));
@@ -598,22 +599,22 @@ TEST_F(BluetoothClassicTest, CanDiscoverDeviceChanges) {
           .device_discovered_cb =
               [&discovered_latch, &discovered_device](BluetoothDevice& device) {
                 discovered_device = device;
-                NEARBY_LOGS(INFO) << "Discovered device=" << device.GetName()
-                                  << ", impl=" << &device.GetImpl();
+                LOG(INFO) << "Discovered device=" << device.GetName()
+                          << ", impl=" << &device.GetImpl();
                 discovered_latch.CountDown();
               },
           .device_name_changed_cb =
               [&rename_latch, &discovered_device](BluetoothDevice& device) {
                 discovered_device = device;
-                NEARBY_LOGS(INFO) << "Rename device=" << device.GetName()
-                                  << ", impl=" << &device.GetImpl();
+                LOG(INFO) << "Rename device=" << device.GetName()
+                          << ", impl=" << &device.GetImpl();
                 rename_latch.CountDown();
               },
           .device_lost_cb =
               [&lost_latch, &discovered_device](BluetoothDevice& device) {
                 discovered_device = device;
-                NEARBY_LOGS(INFO) << "Lost device=" << device.GetName()
-                                  << ", impl=" << &device.GetImpl();
+                LOG(INFO) << "Lost device=" << device.GetName()
+                          << ", impl=" << &device.GetImpl();
                 lost_latch.CountDown();
               },
       }));
@@ -644,8 +645,8 @@ TEST_F(BluetoothClassicTest, CanStartAcceptingConnections) {
           .device_discovered_cb =
               [&latch, &discovered_device](BluetoothDevice& device) {
                 discovered_device = device;
-                NEARBY_LOGS(INFO) << "Discovered device=" << device.GetName()
-                                  << ",impl=" << &device.GetImpl();
+                LOG(INFO) << "Discovered device=" << device.GetName()
+                          << ",impl=" << &device.GetImpl();
                 latch.CountDown();
               },
       }));
@@ -677,19 +678,18 @@ TEST_F(BluetoothClassicTest, CheckDiscoveryingStatus) {
 }
 
 TEST_F(BluetoothClassicTest, GetMacAddress) {
-  EXPECT_NE(bt_a_->GetMacAddress(), "");
+  EXPECT_TRUE(bt_a_->GetAddress().IsSet());
   radio_a_->Disable();
-  EXPECT_EQ(bt_a_->GetMacAddress(), "");
+  EXPECT_FALSE(bt_a_->GetAddress().IsSet());
 }
 
 TEST_F(BluetoothClassicTest, GetRemoteDevice) {
-  EXPECT_EQ(
-      bt_a_->GetRemoteDevice(radio_b_->GetBluetoothAdapter().GetMacAddress())
-          .GetMacAddress(),
-      radio_b_->GetBluetoothAdapter().GetMacAddress());
+  EXPECT_EQ(bt_a_->GetRemoteDevice(radio_b_->GetBluetoothAdapter().GetAddress())
+                .GetAddress(),
+            radio_b_->GetBluetoothAdapter().GetAddress());
   radio_a_->Disable();
   EXPECT_FALSE(
-      bt_a_->GetRemoteDevice(radio_b_->GetBluetoothAdapter().GetMacAddress())
+      bt_a_->GetRemoteDevice(radio_b_->GetBluetoothAdapter().GetAddress())
           .IsValid());
 }
 

@@ -28,7 +28,11 @@
 #include "third_party/leveldb/include/options.h"
 #include "third_party/leveldb/include/slice.h"
 #include "third_party/leveldb/include/status.h"
+#include "internal/base/file_path.h"
 #include "internal/data/data_set.h"
+#if defined(_WIN32)
+#include "location/nearby/apps/better_together/windows/common/leveldb_env_windows.h"
+#endif  // defined(_WIN32)
 #include "internal/platform/logging.h"
 #include "google/protobuf/message_lite.h"
 
@@ -43,7 +47,13 @@ class LeveldbDataSet : public DataSet<T> {
  public:
   using KeyEntryVector = std::vector<std::pair<std::string, T>>;
 
-  explicit LeveldbDataSet(absl::string_view path) : path_(path) {}
+  explicit LeveldbDataSet(const FilePath& db_dir) : path_(db_dir.ToString()) {
+#if defined(_WIN32)
+    // In Windows use the Unicode compatible environment.
+    db_options_.env = nearby::windows::WindowsEnv::Default();
+#endif  // defined(_WIN32)
+    db_options_.create_if_missing = true;
+  }
   ~LeveldbDataSet() override = default;
 
   void Initialize(absl::AnyInvocable<void(InitStatus) &&> callback) override;
@@ -69,6 +79,7 @@ class LeveldbDataSet : public DataSet<T> {
 
  private:
   std::string path_;
+  leveldb::Options db_options_;
   std::unique_ptr<leveldb::DB> db_ = nullptr;
   InitStatus status_ = InitStatus::kNotInitialized;
 };
@@ -78,11 +89,8 @@ template <typename T,
               isMessageLite>
 void LeveldbDataSet<T, isMessageLite>::Initialize(
     absl::AnyInvocable<void(InitStatus) &&> callback) {
-  leveldb::Options options;
-  options.create_if_missing = true;
-
   leveldb::DB* db;
-  leveldb::Status status = leveldb::DB::Open(options, path_, &db);
+  leveldb::Status status = leveldb::DB::Open(db_options_, path_, &db);
   db_ = std::unique_ptr<leveldb::DB>(db);
 
   if (status.ok()) {
@@ -90,11 +98,11 @@ void LeveldbDataSet<T, isMessageLite>::Initialize(
     LOG(INFO) << "Database is initialized successfully..";
   } else if (status.IsCorruption() || status.IsIOError()) {
     status_ = InitStatus::kCorrupt;
-    LOG(INFO) << "Database is corrupt.";
+    LOG(WARNING) << "Database is corrupt.";
 
   } else {
     status_ = InitStatus::kError;
-    LOG(INFO) << "Failed to initialize database due to unknown error.";
+    LOG(ERROR) << "Failed to initialize database due to unknown error.";
   }
   std::move(callback)(status_);
 }
@@ -121,10 +129,10 @@ void LeveldbDataSet<T, isMessageLite>::LoadEntries(
   }
 
   if (it->status().ok()) {
-    LOG(INFO) << "Loaded " << result->size() << " entries from database.";
+    VLOG(1) << "Loaded " << result->size() << " entries from database.";
     std::move(callback)(true, std::move(result));
   } else {
-    LOG(INFO) << "Failed to load entries from database.";
+    LOG(ERROR) << "Failed to load entries from database.";
     result->clear();
     std::move(callback)(false, std::move(result));
   }
@@ -144,7 +152,7 @@ void LeveldbDataSet<T, isMessageLite>::LoadEntry(
 
   std::string value;
   if (!db_->Get(leveldb::ReadOptions(), std::string(key), &value).ok()) {
-    LOG(INFO) << "Failed to load entry from database with key: " << key;
+    LOG(WARNING) << "Failed to load entry from database with key: " << key;
     std::move(callback)(false, std::move(result));
     return;
   }
@@ -175,10 +183,10 @@ void LeveldbDataSet<T, isMessageLite>::LoadEntriesWithKeys(
   }
 
   if (it->status().ok()) {
-    LOG(INFO) << "Loaded " << result->size() << " entries from database.";
+    VLOG(1) << "Loaded " << result->size() << " entries from database.";
     std::move(callback)(true, std::move(result));
   } else {
-    LOG(INFO) << "Failed to load entries from database.";
+    LOG(WARNING) << "Failed to load entries from database.";
     result->clear();
     std::move(callback)(false, std::move(result));
   }
@@ -191,7 +199,7 @@ void LeveldbDataSet<T, isMessageLite>::UpdateEntries(
     std::unique_ptr<KeyEntryVector> entries_to_save,
     std::unique_ptr<std::vector<std::string>> keys_to_remove,
     absl::AnyInvocable<void(bool) &&> callback) {
-  LOG(INFO) << "UpdateEntries is called.";
+  VLOG(1) << "UpdateEntries is called.";
   if (status_ != InitStatus::kOK) {
     std::move(callback)(false);
     return;
@@ -219,9 +227,9 @@ template <typename T,
               isMessageLite>
 void LeveldbDataSet<T, isMessageLite>::Destroy(
     absl::AnyInvocable<void(bool) &&> callback) {
-  LOG(INFO) << "Destroy is called.";
+  VLOG(1) << "Destroy is called.";
   db_.reset();
-  leveldb::DestroyDB(path_, leveldb::Options());
+  leveldb::DestroyDB(path_, db_options_);
   std::move(callback)(true);
 }
 

@@ -19,10 +19,9 @@
 #include <string>
 
 #include "gtest/gtest.h"
-
 #include "internal/platform/implementation/webrtc.h"
-#include "webrtc/api/jsep.h"
 #include "webrtc/api/data_channel_interface.h"
+#include "webrtc/api/jsep.h"
 #include "webrtc/api/peer_connection_interface.h"
 #include "webrtc/api/scoped_refptr.h"
 
@@ -34,14 +33,13 @@ class MockPeerConnectionObserver : public webrtc::PeerConnectionObserver {
   void OnSignalingChange(
       webrtc::PeerConnectionInterface::SignalingState new_state) override {}
 
-  void OnDataChannel(
-      rtc::scoped_refptr<webrtc::DataChannelInterface> data_channel) override {}
+  void OnDataChannel(webrtc::scoped_refptr<webrtc::DataChannelInterface>
+                         data_channel) override {}
 
   void OnIceGatheringChange(
       webrtc::PeerConnectionInterface::IceGatheringState new_state) override {}
 
-  void OnIceCandidate(const webrtc::IceCandidateInterface* candidate) override {
-  }
+  void OnIceCandidate(const webrtc::IceCandidate* candidate) override {}
 };
 
 location::nearby::connections::LocationHint GetCountryCodeLocationHint(
@@ -64,7 +62,7 @@ TEST(WebrtcTest, CreatePeerConnectionSucceeds) {
   WebRtcMedium medium;
   medium.CreatePeerConnection(
       std::nullopt, observer.get(),
-      [](rtc::scoped_refptr<webrtc::PeerConnectionInterface>
+      [](webrtc::scoped_refptr<webrtc::PeerConnectionInterface>
              peer_connection) mutable {
         if (!peer_connection) {
           FAIL() << "Peer connection should have been non-null";

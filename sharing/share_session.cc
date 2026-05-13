@@ -72,31 +72,37 @@ std::string TokenToFourDigitString(const std::vector<uint8_t>& bytes) {
 }  // namespace
 
 /* static */
+// Only used for final statuses.
 AttachmentTransmissionStatus ShareSession::ConvertToTransmissionStatus(
     TransferMetadata::Status status) {
   switch (status) {
     case TransferMetadata::Status::kComplete:
       return AttachmentTransmissionStatus::
           COMPLETE_ATTACHMENT_TRANSMISSION_STATUS;
-    case TransferMetadata::Status::kCancelled:
-      return AttachmentTransmissionStatus::
-          CANCELED_ATTACHMENT_TRANSMISSION_STATUS;
     case TransferMetadata::Status::kFailed:
       return AttachmentTransmissionStatus::
           FAILED_ATTACHMENT_TRANSMISSION_STATUS;
-    case TransferMetadata::Status::kIncompletePayloads:
-      return AttachmentTransmissionStatus::FAILED_NO_PAYLOAD;
+    case TransferMetadata::Status::kRejected:
+      return AttachmentTransmissionStatus::
+          REJECTED_ATTACHMENT_TRANSMISSION_STATUS;
+    case TransferMetadata::Status::kCancelled:
+      return AttachmentTransmissionStatus::
+          CANCELED_ATTACHMENT_TRANSMISSION_STATUS;
+    case TransferMetadata::Status::kTimedOut:
+      return AttachmentTransmissionStatus::
+          TIMED_OUT_ATTACHMENT_TRANSMISSION_STATUS;
     case TransferMetadata::Status::kMediaUnavailable:
       return AttachmentTransmissionStatus::MEDIA_UNAVAILABLE_ATTACHMENT;
-    case TransferMetadata::Status::kDeviceAuthenticationFailed:
-      return AttachmentTransmissionStatus::FAILED_PAIRED_KEYHANDSHAKE;
-    case TransferMetadata::Status::kRejected:
-      return AttachmentTransmissionStatus::REJECTED_ATTACHMENT;
-    case TransferMetadata::Status::kTimedOut:
-      return AttachmentTransmissionStatus::TIMED_OUT_ATTACHMENT;
+    case TransferMetadata::Status::kNotEnoughSpace:
+      return AttachmentTransmissionStatus::
+          NOT_ENOUGH_SPACE_ATTACHMENT_TRANSMISSION_STATUS;
     case TransferMetadata::Status::kUnsupportedAttachmentType:
       return AttachmentTransmissionStatus::
-          UNSUPPORTED_ATTACHMENT_TYPE_ATTACHMENT;
+          UNSUPPORTED_ATTACHMENT_TYPE_ATTACHMENT_TRANSMISSION_STATUS;
+    case TransferMetadata::Status::kDeviceAuthenticationFailed:
+      return AttachmentTransmissionStatus::FAILED_PAIRED_KEYHANDSHAKE;
+    case TransferMetadata::Status::kIncompletePayloads:
+      return AttachmentTransmissionStatus::FAILED_NO_PAYLOAD;
     default:
       return AttachmentTransmissionStatus::
           UNKNOWN_ATTACHMENT_TRANSMISSION_STATUS;
@@ -170,7 +176,10 @@ void ShareSession::Abort(TransferMetadata::Status status) {
 
   // First invoke the appropriate transfer callback with the final
   // |status|.
-  UpdateTransferMetadata(TransferMetadataBuilder().set_status(status).build());
+  UpdateTransferMetadata(TransferMetadataBuilder()
+                             .set_usage(session_usage())
+                             .set_status(status)
+                             .build());
   Disconnect();
 }
 
@@ -197,11 +206,53 @@ void ShareSession::RunPairedKeyVerification(
   key_verification_runner_->Run(std::move(callback));
 }
 
+bool ShareSession::ProcessKeyVerificationResult(
+    PairedKeyVerificationRunner::PairedKeyVerificationResult result,
+    OSType share_target_os_type) {
+  os_type_ = share_target_os_type;
+
+  switch (result) {
+    case PairedKeyVerificationRunner::PairedKeyVerificationResult::kFail:
+      LOG(WARNING) << __func__ << ": Paired key handshake failed for target "
+                   << share_target().id << ". Disconnecting.";
+      return false;
+
+    case PairedKeyVerificationRunner::PairedKeyVerificationResult::kSuccess:
+      VLOG(1) << __func__ << ": Paired key handshake succeeded for target - "
+              << share_target().id;
+      // If verification succeeds, this either means that the target is a
+      // self-share or a mutual contact. In either case, we should clear the
+      // token.
+      token_.resize(0);
+      break;
+
+    case PairedKeyVerificationRunner::PairedKeyVerificationResult::kUnable:
+      VLOG(1) << __func__
+              << ": Unable to verify paired key encryption when "
+                 "receiving connection from target - "
+              << share_target().id;
+      // If we are unable to verify the paired key, we should clear the self
+      // share flag.
+      self_share_ = false;
+      break;
+
+    case PairedKeyVerificationRunner::PairedKeyVerificationResult::kUnknown:
+      LOG(WARNING) << __func__
+                   << ": Unknown PairedKeyVerificationResult for target "
+                   << share_target().id << ". Disconnecting.";
+      return false;
+  }
+  return true;
+}
+
 void ShareSession::OnDisconnect() {
   OnConnectionDisconnected();
   if (disconnect_status_ != TransferMetadata::Status::kUnknown) {
     UpdateTransferMetadata(
-        TransferMetadataBuilder().set_status(disconnect_status_).build());
+        TransferMetadataBuilder()
+            .set_usage(session_usage())
+            .set_status(disconnect_status_)
+            .build());
   }
   connection_ = nullptr;
 }
@@ -259,45 +310,6 @@ void ShareSession::WriteCancelFrame() {
   v1_frame->set_type(V1Frame::CANCEL);
 
   WriteFrame(frame);
-}
-
-bool ShareSession::HandleKeyVerificationResult(
-    PairedKeyVerificationRunner::PairedKeyVerificationResult result,
-    location::nearby::proto::sharing::OSType share_target_os_type) {
-  os_type_ = share_target_os_type;
-
-  switch (result) {
-    case PairedKeyVerificationRunner::PairedKeyVerificationResult::kFail:
-      LOG(WARNING) << __func__ << ": Paired key handshake failed for target "
-                   << share_target().id << ". Disconnecting.";
-      return false;
-
-    case PairedKeyVerificationRunner::PairedKeyVerificationResult::kSuccess:
-      VLOG(1) << __func__ << ": Paired key handshake succeeded for target - "
-              << share_target().id;
-      // If verification succeeds, this either means that the target is a
-      // self-share or a mutual contact. In either case, we should clear the
-      // token.
-      token_.resize(0);
-      break;
-
-    case PairedKeyVerificationRunner::PairedKeyVerificationResult::kUnable:
-      VLOG(1) << __func__
-              << ": Unable to verify paired key encryption when "
-                 "receiving connection from target - "
-              << share_target().id;
-      // If we are unable to verify the paired key, we should clear the self
-      // share flag.
-      self_share_ = false;
-      break;
-
-    case PairedKeyVerificationRunner::PairedKeyVerificationResult::kUnknown:
-      LOG(WARNING) << __func__
-                   << ": Unknown PairedKeyVerificationResult for target "
-                   << share_target().id << ". Disconnecting.";
-      return false;
-  }
-  return true;
 }
 
 void ShareSession::InitializePayloadTracker(

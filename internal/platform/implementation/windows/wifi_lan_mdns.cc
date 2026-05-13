@@ -30,12 +30,12 @@
 #include "absl/synchronization/notification.h"
 #include "absl/time/time.h"
 #include "internal/platform/implementation/windows/string_utils.h"
+#include "internal/platform/implementation/windows/utils.h"
 #include "internal/platform/logging.h"
 
 namespace nearby::windows {
 namespace {
 // mDNS information for advertising and discovery
-const char kMdnsHostName[] = "%s.local";
 const char kMdnsInstanceNameFormat[] = "%s.%slocal";
 
 // Timeout for starting mDNS service
@@ -50,8 +50,8 @@ WifiLanMdns::~WifiLanMdns() {
 
 bool WifiLanMdns::StartMdnsService(
     const std::string& service_name, const std::string& service_type, int port,
-    absl::flat_hash_map<std::string, std::string> text_records) {
-  absl::MutexLock lock(&mutex_);
+    const absl::flat_hash_map<std::string, std::string>& text_records) {
+  absl::MutexLock lock(mutex_);
   LOG(INFO) << "StartMdnsService: " << service_name << " " << service_type
             << " " << port;
   if (is_service_started_) {
@@ -66,22 +66,20 @@ bool WifiLanMdns::StartMdnsService(
   // Composite the service request.
   std::string instance_name =
       absl::StrFormat(kMdnsInstanceNameFormat, service_name, service_type);
-  dns_service_instance_name_ = std::make_unique<std::wstring>(
-      string_utils::StringToWideString(instance_name));
+  dns_service_instance_name_ = string_utils::StringToWideString(instance_name);
 
-  std::optional<std::string> computer_name = GetComputerName();
+  std::optional<std::wstring> computer_name = GetDnsHostName();
   if (!computer_name.has_value()) {
     LOG(ERROR) << "Failed to get computer name.";
     return false;
   }
+  computer_name->append(L".local");
+  host_name_ = computer_name.value();
 
-  std::string host_name = absl::StrFormat(kMdnsHostName, *computer_name);
-  host_name_ = std::make_unique<std::wstring>(
-      string_utils::StringToWideString(host_name));
-
-  dns_service_instance_.pszInstanceName =
-      (LPWSTR)dns_service_instance_name_->c_str();
-  dns_service_instance_.pszHostName = (LPWSTR)host_name_->c_str();
+  dns_service_instance_.pszInstanceName = dns_service_instance_name_.data();
+  // Hostname must match the host's DNS name, otherwise A/AAAA records cannot be
+  // resolved.
+  dns_service_instance_.pszHostName = host_name_.data();
   dns_service_instance_.wPort = port;
 
   // Allocate memory for filling text records, it should be freed in
@@ -94,16 +92,13 @@ bool WifiLanMdns::StartMdnsService(
       text_values_.push_back(string_utils::StringToWideString(value));
     }
 
-    keys_ = new PWSTR[text_records.size()];
-    values_ = new PWSTR[text_records.size()];
+    dns_service_instance_.keys = new PWSTR[text_records.size()];
+    dns_service_instance_.values = new PWSTR[text_records.size()];
 
     for (int i = 0; i < text_records.size(); ++i) {
-      keys_[i] = text_keys_[i].data();
-      values_[i] = text_values_[i].data();
+      dns_service_instance_.keys[i] = text_keys_[i].data();
+      dns_service_instance_.values[i] = text_values_[i].data();
     }
-
-    dns_service_instance_.keys = keys_;
-    dns_service_instance_.values = values_;
   }
 
   // Init DNS service register request
@@ -122,8 +117,8 @@ bool WifiLanMdns::StartMdnsService(
   DWORD status = DnsServiceRegister(&dns_service_register_request_, nullptr);
 
   if (status != DNS_REQUEST_PENDING) {
-    NEARBY_LOGS(ERROR) << "Failed to start mDNS advertising for service type ="
-                       << service_type;
+    LOG(ERROR) << "Failed to start mDNS advertising for service type ="
+               << service_type;
     return false;
   }
 
@@ -144,11 +139,11 @@ bool WifiLanMdns::StartMdnsService(
 }
 
 bool WifiLanMdns::StopMdnsService() {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   LOG(INFO) << "StopMdnsService is called";
   if (!is_service_started_) {
     LOG(WARNING) << "The mDNS service is not started.";
-    return false;
+    return true;
   }
 
   dns_service_notification_ = std::make_unique<absl::Notification>();
@@ -156,25 +151,19 @@ bool WifiLanMdns::StopMdnsService() {
   DWORD status = DnsServiceDeRegister(&dns_service_register_request_, nullptr);
 
   if (status != DNS_REQUEST_PENDING) {
-    NEARBY_LOGS(ERROR) << "Failed to stop mDNS advertising.";
+    LOG(ERROR) << "Failed to stop mDNS advertising.";
+    CleanUp();
     return false;
   }
 
   if (!dns_service_notification_->WaitForNotificationWithTimeout(
           kDnsServiceTimeout)) {
     LOG(ERROR) << "Failed to start mDNS advertising.";
+    CleanUp();
     return false;
   }
 
-  dns_service_notification_ = nullptr;
-  if (dns_service_instance_.keys != nullptr) {
-    delete[] dns_service_instance_.keys;
-    delete[] dns_service_instance_.values;
-    dns_service_instance_.keys = nullptr;
-    dns_service_instance_.values = nullptr;
-  }
-
-  is_service_started_ = false;
+  CleanUp();
   LOG(INFO) << "Succeeded to stop mDNS advertising.";
 
   return true;
@@ -187,23 +176,26 @@ void WifiLanMdns::NotifyStatusUpdated(DWORD status) {
   }
 }
 
-std::optional<std::string> WifiLanMdns::GetComputerName() {
-  char computer_name[MAX_COMPUTERNAME_LENGTH + 1];
-  DWORD size = sizeof(computer_name);
-
-  // Get the computer name.
-  if (::GetComputerNameA(computer_name, &size)) {
-    return std::string(computer_name, size);
-  } else {
-    return std::nullopt;
-  }
-}
-
 void WifiLanMdns::DnsServiceRegisterComplete(DWORD Status, PVOID pQueryContext,
                                              PDNS_SERVICE_INSTANCE pInstance) {
-  LOG(INFO) << "DnsServiceRegisterComplete: " << Status;
+  VLOG(1) << "DnsServiceRegisterComplete: " << Status;
   WifiLanMdns* mdns = static_cast<WifiLanMdns*>(pQueryContext);
   mdns->NotifyStatusUpdated(Status);
+}
+
+void WifiLanMdns::CleanUp() {
+  is_service_started_ = false;
+  dns_service_notification_ = nullptr;
+  if (dns_service_instance_.keys != nullptr) {
+    delete[] dns_service_instance_.keys;
+    dns_service_instance_.keys = nullptr;
+  }
+  if (dns_service_instance_.values != nullptr) {
+    delete[] dns_service_instance_.values;
+    dns_service_instance_.values = nullptr;
+  }
+  text_keys_.clear();
+  text_values_.clear();
 }
 
 }  // namespace nearby::windows

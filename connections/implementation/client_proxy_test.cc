@@ -21,7 +21,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/casts.h"
 #include "gmock/gmock.h"
 #include "protobuf-matchers/protocol-buffer-matchers.h"
 #include "gtest/gtest.h"
@@ -65,6 +64,7 @@ using ::location::nearby::connections::OsInfo;
 using ::location::nearby::proto::connections::CLIENT_SESSION;
 using ::location::nearby::proto::connections::START_CLIENT_SESSION;
 using ::location::nearby::proto::connections::STOP_CLIENT_SESSION;
+using ::testing::IsEmpty;
 using ::testing::MockFunction;
 using ::testing::StrictMock;
 
@@ -162,7 +162,8 @@ class ClientProxyTest : public ::testing::TestWithParam<FeatureFlags::Flags> {
 
   void SetUp() override {
     EnvironmentConfig config{/*webrtc_enabled=*/false,
-                             /*use_simulated_clock=*/true};
+                             /*use_simulated_clock=*/true,
+                             /*use_temporary_directory_for_app_path=*/true};
     env_.Start(config);
     client1_ = std::make_unique<ClientProxy>(&event_logger1_);
     client2_ = std::make_unique<ClientProxy>(&event_logger2_);
@@ -173,12 +174,6 @@ class ClientProxyTest : public ::testing::TestWithParam<FeatureFlags::Flags> {
     client2_.reset();
     env_.Stop();
     NearbyFlags::GetInstance().ResetOverridedValues();
-  }
-
-  bool ShouldEnterHighVisibilityMode(
-      const AdvertisingOptions& advertising_options) {
-    return !advertising_options.low_power &&
-           advertising_options.allowed.bluetooth;
   }
 
   bool ShouldEnterStableEndpointIdMode(
@@ -195,16 +190,8 @@ class ClientProxyTest : public ::testing::TestWithParam<FeatureFlags::Flags> {
   Endpoint StartAdvertising(
       ClientProxy* client, ConnectionListener listener,
       AdvertisingOptions advertising_options = AdvertisingOptions{}) {
-    if (NearbyFlags::GetInstance().GetBoolFlag(
-            connections::config_package_nearby::nearby_connections_feature::
-                kUseStableEndpointId)) {
-      if (ShouldEnterStableEndpointIdMode(advertising_options)) {
-        client->EnterStableEndpointIdMode();
-      }
-    } else {
-      if (ShouldEnterHighVisibilityMode(advertising_options)) {
-        client->EnterHighVisibilityMode();
-      }
+    if (ShouldEnterStableEndpointIdMode(advertising_options)) {
+      client->EnterStableEndpointIdMode();
     }
     Endpoint endpoint{
         .info = ByteArray{"advertising endpoint name"},
@@ -368,22 +355,12 @@ class ClientProxyTest : public ::testing::TestWithParam<FeatureFlags::Flags> {
     client->OnPayloadProgress(endpoint.id, {});
   }
 
-  void EnableUseStableEndpointIdFeature() {
-    NearbyFlags::GetInstance().OverrideBoolFlagValue(
-        connections::config_package_nearby::nearby_connections_feature::
-            kUseStableEndpointId,
-        true);
-  }
-
   ClientProxy* client1() { return client1_.get(); }
 
   ClientProxy* client2() { return client2_.get(); }
 
   void FastForward(absl::Duration duration) {
-    (*env_.GetSimulatedClock())
-        ->FastForward(
-            ClientProxy::kHighPowerAdvertisementEndpointIdCacheTimeout +
-            absl::Milliseconds(100));
+    env_.FastForward(duration);
     // make sure the timer based callback is executed.
     absl::SleepFor(absl::Milliseconds(100));
   }
@@ -574,7 +551,6 @@ TEST_F(ClientProxyTest, DumpString) {
       "Nearby Connections State\n"
       "  Client ID: %d\n"
       "  Local Endpoint ID: %s\n"
-      "  High Visibility Mode: false\n"
       "  Is Advertising: false\n"
       "  Is Discovering: false\n"
       "  Advertising Service ID: \n"
@@ -825,7 +801,6 @@ TEST_F(ClientProxyTest,
 
 TEST_F(ClientProxyTest,
        RotateWhenLowVizAdvertisementAfterHighVizAndStableAdvertisement) {
-  EnableUseStableEndpointIdFeature();
   BooleanMediumSelector booleanMediumSelector;
   booleanMediumSelector.bluetooth = true;
 
@@ -866,7 +841,6 @@ TEST_F(ClientProxyTest,
 TEST_F(
     ClientProxyTest,
     NoRotateWhenLowVizStableAdvertisementAfterHighVizAndStableAdvertisement) {
-  EnableUseStableEndpointIdFeature();
   BooleanMediumSelector booleanMediumSelector;
   booleanMediumSelector.bluetooth = true;
 
@@ -910,7 +884,6 @@ TEST_F(
 TEST_F(
     ClientProxyTest,
     NoRotateWhenAdvertisementHasConnectionAfterStableAdvertisementForAWhile) {
-  EnableUseStableEndpointIdFeature();
   BooleanMediumSelector booleanMediumSelector;
   booleanMediumSelector.bluetooth = true;
 
@@ -957,7 +930,6 @@ TEST_F(
 }
 
 TEST_F(ClientProxyTest, RotateWhenLowVizAdvertisementAfterDisconnection) {
-  EnableUseStableEndpointIdFeature();
   BooleanMediumSelector booleanMediumSelector;
   booleanMediumSelector.bluetooth = true;
 
@@ -1000,7 +972,6 @@ TEST_F(ClientProxyTest, RotateWhenLowVizAdvertisementAfterDisconnection) {
 
 TEST_F(ClientProxyTest,
        NoRotateWhenLowVizAndStableAdvertisementAfterDisconnection) {
-  EnableUseStableEndpointIdFeature();
   BooleanMediumSelector booleanMediumSelector;
   booleanMediumSelector.bluetooth = true;
 
@@ -1045,7 +1016,6 @@ TEST_F(ClientProxyTest,
 }
 
 TEST_F(ClientProxyTest, RotateWhenAdvertisementAfterDisconnectionForAWhile) {
-  EnableUseStableEndpointIdFeature();
   BooleanMediumSelector booleanMediumSelector;
   booleanMediumSelector.bluetooth = true;
 
@@ -1146,36 +1116,6 @@ TEST_F(ClientProxyTest,
   EXPECT_NE(advertising_endpoint_1.id, advertising_endpoint_2.id);
 }
 
-// Tests the low visibility mode with bluetooth disabled advertisment.
-TEST_F(ClientProxyTest,
-       EndpointIdRotateWhenLowVizAdvertisementWithBluetoothDisabled) {
-  BooleanMediumSelector booleanMediumSelector;
-  booleanMediumSelector.bluetooth = false;
-
-  AdvertisingOptions advertising_options{
-      {
-          strategy_,
-          booleanMediumSelector,
-      },
-      false,  // auto_upgrade_bandwidth
-      false,  // enforce_topology_constraints
-      false,  // low_power
-      true,   // enable_bluetooth_listening
-      false,  // enable_webrtc_listening
-      true,   // use_stable_endpoint_id
-  };
-
-  Endpoint advertising_endpoint_1 = StartAdvertising(
-      client1(), advertising_connection_listener_, advertising_options);
-
-  StopAdvertising(client1());
-
-  Endpoint advertising_endpoint_2 = StartAdvertising(
-      client1(), advertising_connection_listener_, advertising_options);
-
-  EXPECT_NE(advertising_endpoint_1.id, advertising_endpoint_2.id);
-}
-
 // Tests the low visibility mode with low power advertisment.
 TEST_F(ClientProxyTest, EndpointIdRotateWhenLowVizAdvertisementWithLowPower) {
   BooleanMediumSelector booleanMediumSelector;
@@ -1218,7 +1158,6 @@ TEST_F(ClientProxyTest, NotLogSessionForStoppedAdvertisingWithConnection) {
 
   // After
   StopAdvertising(client1());  // No Advertising
-  client1()->GetAnalyticsRecorder().Sync();
   EXPECT_EQ(event_logger1_.GetCompleteClientSessionCount(), 0);
 }
 
@@ -1232,12 +1171,10 @@ TEST_F(ClientProxyTest,
       advertising_endpoint.id));             // No Connections
   EXPECT_FALSE(client1()->IsDiscovering());  // No Discovery
   EXPECT_TRUE(client1()->IsAdvertising());   // Advertising
-  client1()->GetAnalyticsRecorder().Sync();
   EXPECT_EQ(event_logger1_.GetCompleteClientSessionCount(), 0);
 
   // After
   StopAdvertising(client1());
-  client1()->GetAnalyticsRecorder().Sync();
   EXPECT_GT(event_logger1_.GetCompleteClientSessionCount(), 0);
 }
 
@@ -1256,7 +1193,6 @@ TEST_F(ClientProxyTest, NotLogSessionForStoppedDiscoveryWithConnection) {
 
   // After
   StopDiscovery(client2());
-  client2()->GetAnalyticsRecorder().Sync();
   EXPECT_EQ(event_logger2_.GetCompleteClientSessionCount(), 0);
 }
 
@@ -1275,7 +1211,6 @@ TEST_F(ClientProxyTest,
 
   // After
   StopDiscovery(client2());
-  client2()->GetAnalyticsRecorder().Sync();
   EXPECT_GT(event_logger2_.GetCompleteClientSessionCount(), 0);
 }
 
@@ -1294,7 +1229,6 @@ TEST_F(ClientProxyTest, LogSessionOnDisconnectedWithOneConnection) {
 
   // After
   OnDiscoveryConnectionDisconnected(client2(), advertising_endpoint);
-  client2()->GetAnalyticsRecorder().Sync();
   EXPECT_GT(event_logger2_.GetCompleteClientSessionCount(), 0);
 }
 
@@ -1311,7 +1245,6 @@ TEST_F(ClientProxyTest,
 
   // After
   client2()->OnDisconnected(advertising_endpoint.id, /*notify=*/false);
-  client2()->GetAnalyticsRecorder().Sync();
   EXPECT_EQ(event_logger2_.GetCompleteClientSessionCount(), 0);
 }
 
@@ -1339,7 +1272,6 @@ TEST_F(ClientProxyTest, NotLogSessionOnDisconnectedWhenMoreThanOneConnection) {
 
   // After
   client2()->OnDisconnected(advertising_endpoint_1.id, /*notify=*/false);
-  client2()->GetAnalyticsRecorder().Sync();
   EXPECT_EQ(event_logger2_.GetCompleteClientSessionCount(), 0);
 }
 
@@ -1359,7 +1291,6 @@ TEST_F(ClientProxyTest,
 
   // After
   OnDiscoveryConnectionDisconnected(client2(), advertising_endpoint);
-  client2()->GetAnalyticsRecorder().Sync();
   // Since we are no longer checking IsDiscovering(), we complete sessions now
   // solely based on advertising.
   EXPECT_EQ(event_logger2_.GetCompleteClientSessionCount(), 1);
@@ -1372,17 +1303,13 @@ TEST_F(ClientProxyTest, LogSessionForResetClientProxy) {
   OnDiscoveryEndpointFound(client2(), advertising_endpoint);
   OnDiscoveryConnectionInitiated(client2(), advertising_endpoint);
 
-  client1()->GetAnalyticsRecorder().Sync();
   EXPECT_EQ(event_logger1_.GetCompleteClientSessionCount(), 0);
   client1()->Reset();
-  client1()->GetAnalyticsRecorder().Sync();
   // TODO(b/290936886): Why are there more than one complete sessions?
   EXPECT_GT(event_logger1_.GetCompleteClientSessionCount(), 0);
 
-  client2()->GetAnalyticsRecorder().Sync();
   EXPECT_EQ(event_logger2_.GetCompleteClientSessionCount(), 0);
   client2()->Reset();
-  client2()->GetAnalyticsRecorder().Sync();
   EXPECT_GT(event_logger2_.GetCompleteClientSessionCount(), 0);
 }
 
@@ -1470,9 +1397,7 @@ TEST_F(ClientProxyTest, GetLocalDeviceWorksWithDeviceProvider) {
   MockDeviceProvider provider;
   client1()->RegisterDeviceProvider(&provider);
   ASSERT_NE(client1()->GetLocalDeviceProvider(), nullptr);
-  EXPECT_CALL(
-      *(down_cast<MockDeviceProvider*>(client1()->GetLocalDeviceProvider())),
-      GetLocalDevice);
+  EXPECT_CALL(provider, GetLocalDevice);
   client1()->GetLocalDevice();
 }
 
@@ -1556,51 +1481,10 @@ TEST_F(ClientProxyTest, TestAutoBwuWhenListeningWithAutoBwu) {
 }
 
 TEST_F(ClientProxyTest, TestMultiplexSocketBitmask) {
-  if (!NearbyFlags::GetInstance().GetBoolFlag(
-          config_package_nearby::nearby_connections_feature::
-              kEnableMultiplex)) {
-    EXPECT_EQ(client1()->GetLocalMultiplexSocketBitmask(), 0);
-  }
-  NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      config_package_nearby::nearby_connections_feature::kEnableMultiplex,
-      true);
   EXPECT_EQ(client1()->GetLocalMultiplexSocketBitmask(), 0);
-  NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      config_package_nearby::nearby_connections_feature::
-          kEnableMultiplexBluetooth,
-      true);
-  NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      config_package_nearby::nearby_connections_feature::
-          kEnableMultiplexWifiLan,
-      true);
-  EXPECT_EQ(
-      client1()->GetLocalMultiplexSocketBitmask(),
-      ClientProxy::kBtMultiplexEnabled | ClientProxy::kWifiLanMultiplexEnabled);
-  NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      config_package_nearby::nearby_connections_feature::kEnableMultiplex,
-      false);
-  NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      config_package_nearby::nearby_connections_feature::
-          kEnableMultiplexBluetooth,
-      false);
-  NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      config_package_nearby::nearby_connections_feature::
-          kEnableMultiplexWifiLan,
-      false);
 }
 
 TEST_F(ClientProxyTest, TestRemoteMultiplexSocketBitmask) {
-  NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      config_package_nearby::nearby_connections_feature::kEnableMultiplex,
-      true);
-  NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      config_package_nearby::nearby_connections_feature::
-          kEnableMultiplexBluetooth,
-      true);
-  NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      config_package_nearby::nearby_connections_feature::
-          kEnableMultiplexWifiLan,
-      true);
   Endpoint advertising_endpoint =
       StartAdvertising(client1(), advertising_connection_listener_);
   OnAdvertisingConnectionInitiated(client1(), advertising_endpoint);
@@ -1615,23 +1499,77 @@ TEST_F(ClientProxyTest, TestRemoteMultiplexSocketBitmask) {
           ->GetRemoteMultiplexSocketBitmask(advertising_endpoint.id)
           .value(),
       ClientProxy::kBtMultiplexEnabled | ClientProxy::kWifiLanMultiplexEnabled);
-  EXPECT_TRUE(client1()->IsMultiplexSocketSupported(advertising_endpoint.id,
-                                                    Medium::BLUETOOTH));
-  EXPECT_TRUE(client1()->IsMultiplexSocketSupported(advertising_endpoint.id,
-                                                    Medium::WIFI_LAN));
+  EXPECT_FALSE(client1()->IsMultiplexSocketSupported(advertising_endpoint.id,
+                                                     Medium::BLUETOOTH));
+  EXPECT_FALSE(client1()->IsMultiplexSocketSupported(advertising_endpoint.id,
+                                                     Medium::WIFI_LAN));
   EXPECT_FALSE(client1()->IsMultiplexSocketSupported(advertising_endpoint.id,
                                                      Medium::WIFI_AWARE));
-  NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      config_package_nearby::nearby_connections_feature::kEnableMultiplex,
-      false);
-  NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      config_package_nearby::nearby_connections_feature::
-          kEnableMultiplexBluetooth,
-      false);
+}
+
+TEST_F(ClientProxyTest, SaveClientInfoFromPreferences) {
   NearbyFlags::GetInstance().OverrideBoolFlagValue(
       config_package_nearby::nearby_connections_feature::
-          kEnableMultiplexWifiLan,
+          kEnableNearbyConnectionsPreferences,
+      true);
+  client1_ = std::make_unique<ClientProxy>(&event_logger1_);
+  Endpoint advertising_endpoint =
+      StartAdvertising(client1(), advertising_connection_listener_);
+  std::string endpoint_id = advertising_endpoint.id;
+  client1_->SaveClientInfoToPreferences();
+
+  // Destroy the client and create a new one.
+  client1_.reset();
+  client1_ = std::make_unique<ClientProxy>(&event_logger1_);
+
+  // The new client should load the same endpoint ID.
+  EXPECT_EQ(client1()->GetLocalEndpointId(), endpoint_id);
+  NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      config_package_nearby::nearby_connections_feature::
+          kEnableNearbyConnectionsPreferences,
       false);
+}
+
+TEST_F(ClientProxyTest, NotLoadClientInfoFromPreferencesOnExpired) {
+  NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      config_package_nearby::nearby_connections_feature::
+          kEnableNearbyConnectionsPreferences,
+      true);
+  client1_ = std::make_unique<ClientProxy>(&event_logger1_);
+  Endpoint advertising_endpoint =
+      StartAdvertising(client1(), advertising_connection_listener_);
+  std::string endpoint_id = advertising_endpoint.id;
+  client1_->SaveClientInfoToPreferences();
+
+  // Destroy the client and create a new one.
+  client1_.reset();
+  FastForward(absl::Hours(25));
+
+  client1_ = std::make_unique<ClientProxy>(&event_logger1_);
+
+  // The new client should load the same endpoint ID.
+  EXPECT_NE(client1()->GetLocalEndpointId(), endpoint_id);
+  NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      config_package_nearby::nearby_connections_feature::
+          kEnableNearbyConnectionsPreferences,
+      false);
+}
+
+TEST_F(ClientProxyTest, OverrideSavePath) {
+  Endpoint advertising_endpoint =
+      StartAdvertising(client1(), advertising_connection_listener_);
+  OnAdvertisingConnectionInitiated(client1(), advertising_endpoint);
+
+  client1()->OverrideSavePath(advertising_endpoint.id, "/tmp/test_path");
+  EXPECT_EQ(client1()->GetSavePath(advertising_endpoint.id), "/tmp/test_path");
+}
+
+TEST_F(ClientProxyTest, GetSavePathDefaultsToEmpty) {
+  Endpoint advertising_endpoint =
+      StartAdvertising(client1(), advertising_connection_listener_);
+  OnAdvertisingConnectionInitiated(client1(), advertising_endpoint);
+
+  EXPECT_THAT(client1()->GetSavePath(advertising_endpoint.id), IsEmpty());
 }
 
 }  // namespace

@@ -11,13 +11,17 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+
 licenses(["notice"])
 
 cc_library(
     name = "mediums",
     srcs = [
+        "awdl.cc",
         "ble.cc",
-        "ble_v2.cc",
         "bluetooth_classic.cc",
         "bluetooth_radio.cc",
         "mediums.cc",
@@ -28,8 +32,8 @@ cc_library(
         "wifi_lan.cc",
     ],
     hdrs = [
+        "awdl.h",
         "ble.h",
-        "ble_v2.h",
         "bluetooth_classic.h",
         "bluetooth_radio.h",
         "mediums.h",
@@ -46,23 +50,31 @@ cc_library(
     ],
     deps = [
         ":utils",
+        ":webrtc_utils",
         "//connections:core_types",
+        "//connections/implementation:types",
         "//connections/implementation/flags:connections_flags",
-        "//connections/implementation/mediums/ble_v2",
-        "//connections/implementation/mediums/multiplex",
+        "//connections/implementation/mediums/ble",
+        "//connections/implementation/mediums/ble:ble_advertisement_header",
+        "//connections/implementation/mediums/ble:ble_socket",
+        "//connections/implementation/mediums/ble:bloom_filter",
         "//connections/implementation/mediums/webrtc",
         "//connections/implementation/proto:offline_wire_formats_cc_proto",
         "//internal/flags:nearby_flags",
         "//internal/platform:base",
         "//internal/platform:cancellation_flag",
         "//internal/platform:comm",
+        "//internal/platform:logging",
+        "//internal/platform:mac_address",
         "//internal/platform:types",
         "//internal/platform:uuid",
+        "//internal/platform/flags:platform_flags",
         "//internal/platform/implementation:comm",
         "//internal/platform/implementation:platform",
         "//internal/platform/implementation:wifi_utils",
         "//proto/mediums:web_rtc_signaling_frames_cc_proto",
-        # TODO: Support WebRTC
+        # "//third_party/webrtc/files/stable/webrtc/api:create_peerconnection_factory",  # buildcleaner: keep
+        # "//third_party/webrtc/files/stable/webrtc/api:jsep",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:btree",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -78,35 +90,56 @@ cc_library(
 )
 
 cc_library(
-    name = "utils",
+    name = "webrtc_utils",
     srcs = [
-        "utils.cc",
         "webrtc_peer_id.cc",
         "webrtc_peer_id_stub.cc",
     ],
     hdrs = [
-        "lost_entity_tracker.h",
-        "utils.h",
         "webrtc_peer_id.h",
         "webrtc_peer_id_stub.h",
         "webrtc_socket.h",
         "webrtc_socket_stub.h",
     ],
-    copts = ["-DNO_WEBRTC"],
     visibility = [
         "//connections/implementation:__pkg__",
-        "//connections/implementation/mediums/ble_v2:__subpackages__",
-        "//connections/implementation/mediums/multiplex:__pkg__",
+        "//connections/implementation/mediums:__pkg__",
         "//connections/implementation/mediums/webrtc:__pkg__",
     ],
     deps = [
+        ":utils",
         "//connections/implementation/mediums/webrtc:data_types",
-        "//connections/implementation/proto:offline_wire_formats_cc_proto",
+        "//internal/platform:base",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_library(
+    name = "lost_entity_tracker",
+    hdrs = ["lost_entity_tracker.h"],
+    visibility = [
+        "//connections/implementation/mediums/ble:__pkg__",
+    ],
+    deps = [
+        "//internal/platform:types",
+        "@com_google_absl//absl/container:flat_hash_set",
+    ],
+)
+
+cc_library(
+    name = "utils",
+    srcs = ["utils.cc"],
+    hdrs = ["utils.h"],
+    copts = ["-DNO_WEBRTC"],
+    visibility = [
+        "//connections/implementation:__pkg__",
+        "//connections/implementation/mediums/advertisements:__pkg__",
+        "//connections/implementation/mediums/ble:__subpackages__",
+        "//internal/platform/implementation/windows:__pkg__",
+    ],
+    deps = [
         "//internal/platform:base",
         "//internal/platform:types",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/container:flat_hash_set",
-        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -114,8 +147,8 @@ cc_test(
     name = "core_internal_mediums_test",
     size = "small",
     srcs = [
+        "awdl_test.cc",
         "ble_test.cc",
-        "ble_v2_test.cc",
         "bluetooth_classic_test.cc",
         "bluetooth_radio_test.cc",
         "lost_entity_tracker_test.cc",
@@ -126,23 +159,27 @@ cc_test(
     ],
     shard_count = 16,
     deps = [
+        ":lost_entity_tracker",
         ":mediums",
-        ":utils",
         "//connections:core_types",
+        "//connections/implementation:types",
         "//connections/implementation/flags:connections_flags",
-        "//connections/implementation/mediums/ble_v2",
+        "//connections/implementation/mediums/ble",
+        "//connections/implementation/mediums/ble:ble_socket",
         "//internal/flags:nearby_flags",
         "//internal/platform:base",
         "//internal/platform:cancellation_flag",
         "//internal/platform:comm",
+        "//internal/platform:logging",
+        "//internal/platform:mac_address",
         "//internal/platform:test_util",
         "//internal/platform:types",
+        "//internal/platform/implementation:comm",
         "//internal/platform/implementation:types",
         "//internal/platform/implementation/g3",  # build_cleaner: keep
         "@com_github_protobuf_matchers//protobuf-matchers",
-        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest_main",
     ],
@@ -162,7 +199,7 @@ cc_test(
     ],
     deps = [
         ":mediums",
-        ":utils",
+        ":webrtc_utils",
         "//internal/platform:base",
         "//internal/platform:cancellation_flag",
         "//internal/platform:comm",
@@ -171,6 +208,7 @@ cc_test(
         "//internal/platform/implementation/g3",  # build_cleaner: keep
         "//internal/test",
         "@com_github_protobuf_matchers//protobuf-matchers",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_googletest//:gtest_main",
     ],
 )

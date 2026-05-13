@@ -19,8 +19,10 @@
 #include <utility>
 
 #include "gtest/gtest.h"
+#include "absl/container/flat_hash_map.h"
 #include "absl/strings/string_view.h"
 #include "connections/connection_options.h"
+#include "connections/implementation/bwu_handler.h"
 #include "connections/implementation/client_proxy.h"
 #include "connections/implementation/endpoint_channel.h"
 #include "connections/implementation/endpoint_channel_manager.h"
@@ -32,10 +34,13 @@
 #include "connections/implementation/offline_frames.h"
 #include "connections/implementation/service_id_constants.h"
 #include "connections/listeners.h"
+#include "connections/medium_selector.h"
 #include "internal/flags/nearby_flags.h"
 #include "internal/platform/byte_array.h"
+#include "internal/platform/count_down_latch.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/feature_flags.h"
+#include "internal/platform/service_address.h"
 #include "internal/proto/analytics/connections_log.pb.h"
 #include "proto/connections_enums.pb.h"
 
@@ -44,9 +49,9 @@ namespace connections {
 namespace {
 using ::location::nearby::analytics::proto::ConnectionsLog;
 using ::location::nearby::connections::BandwidthUpgradeNegotiationFrame;
-using ::location::nearby::connections::
-    BandwidthUpgradeNegotiationFrame_UpgradePathInfo;
+using ::location::nearby::connections::MediumRole;
 using ::location::nearby::connections::OfflineFrame;
+using ::location::nearby::connections::OsInfo;
 using ::location::nearby::connections::V1Frame;
 using ::location::nearby::proto::connections::DisconnectionReason;
 
@@ -58,9 +63,31 @@ constexpr absl::string_view kEndpointId3 = "Endpoint3";
 constexpr absl::string_view kEndpointId4 = "Endpoint4";
 constexpr absl::string_view kEndpointId5 = "Endpoint5";
 
+BandwidthUpgradeNegotiationFrame::UpgradePathInfo::WifiHotspotCredentials
+CreateWifiHotspotCredentials() {
+  BandwidthUpgradeNegotiationFrame::UpgradePathInfo::WifiHotspotCredentials
+      credentials;
+  credentials.set_ssid("Direct-357a2d8c");
+  credentials.set_password("b592f7d3");
+  credentials.set_port(1234);
+  credentials.set_frequency(2412);
+  credentials.set_gateway("123.234.23.1");
+  auto* candidate = credentials.mutable_address_candidates()->Add();
+  candidate->set_ip_address(std::string(
+      "\xfe\x80\\x00\x00\x00\x00\x00\x00\x4d\xb2\xb3\x5c\x22\x03\x98\xa1", 16));
+  candidate->set_port(1234);
+  candidate = credentials.mutable_address_candidates()->Add();
+  candidate->set_ip_address("\x7b\xea\x17\x01");
+  candidate->set_port(2412);
+  return credentials;
+}
+
 class BwuManagerTest : public ::testing::Test {
  protected:
   BwuManagerTest() {
+    NearbyFlags::GetInstance().OverrideBoolFlagValue(
+        config_package_nearby::nearby_connections_feature::kEnableWifiDirect,
+        true);
     // Set up fake BWU handlers for WebRTC and WifiLAN.
     absl::flat_hash_map<Medium, std::unique_ptr<BwuHandler>> handlers;
     auto fake_web_rtc = std::make_unique<FakeBwuHandler>(Medium::WEB_RTC);
@@ -92,6 +119,13 @@ class BwuManagerTest : public ::testing::Test {
   }
 
   ~BwuManagerTest() override { bwu_manager_->Shutdown(); }
+
+  void SetSupportMultipleBwuMediums(bool support_multiple_bwu_mediums) {
+    FeatureFlags& feature_flags = FeatureFlags::GetMutableInstanceForTesting();
+    FeatureFlags::Flags flags = feature_flags.GetFlags();
+    flags.support_multiple_bwu_mediums = support_multiple_bwu_mediums;
+    feature_flags.SetFlags(flags);
+  }
 
   // Create the initial device-to-device connection, before bandwidth upgrade.
   // Typically |medium| will be Bluetooth.
@@ -154,12 +188,12 @@ class BwuManagerTest : public ::testing::Test {
         parser::FromBytes(parser::ForBwuLastWrite());
     bwu_manager_->OnIncomingFrame(last_write_frame.result(),
                                   std::string(endpoint_id), &client_,
-                                  initial_medium, packet_meta_data_);
+                                  initial_medium);
     ExceptionOr<OfflineFrame> safe_to_close_frame =
         parser::FromBytes(parser::ForBwuSafeToClose());
     bwu_manager_->OnIncomingFrame(safe_to_close_frame.result(),
                                   std::string(endpoint_id), &client_,
-                                  initial_medium, packet_meta_data_);
+                                  initial_medium);
 
     return upgraded_channel;
   }
@@ -175,10 +209,12 @@ class BwuManagerTest : public ::testing::Test {
   FakeBwuHandler* fake_wifi_direct_bwu_handler_ = nullptr;
   FakeBwuHandler* fake_wifi_hotspot_bwu_handler_ = nullptr;
   std::unique_ptr<BwuManager> bwu_manager_;
-  PacketMetaData packet_meta_data_;
 };
 
 TEST(BwuManagerBaseTest, AllowToUpgradeMedium) {
+  NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      config_package_nearby::nearby_connections_feature::kEnableWifiDirect,
+      true);
   ClientProxy client;
   EndpointChannelManager ecm;
   EndpointManager em(&ecm);
@@ -236,12 +272,56 @@ TEST(BwuManagerBaseTest, AllowToUpgradeMedium) {
   bwu_manager->Shutdown();
 }
 
+TEST(BwuManagerBaseTest, InitiateBwu_NeedToSwitchRole_Success) {
+  NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      config_package_nearby::nearby_connections_feature::
+          kEnableDynamicRoleSwitch,
+      true);
+  ClientProxy client;
+  EndpointChannelManager ecm;
+  EndpointManager em(&ecm);
+  Mediums mediums;
+  BwuManager::Config config;
+  config.allow_upgrade_to.SetAll(false);
+  absl::flat_hash_map<Medium, std::unique_ptr<BwuHandler>> handlers;
+  auto bwu_manager = std::make_unique<BwuManager>(mediums, em, ecm,
+                                                  std::move(handlers), config);
+  client.SetLocalOsType(OsInfo::APPLE);
+  auto channel1 = std::make_unique<FakeEndpointChannel>(
+      Medium::BLUETOOTH, std::string(kServiceIdA));
+  MediumRole medium_role;
+  medium_role.set_support_wifi_hotspot_host(true);
+  client.OnConnectionInitiated(
+      std::string(kEndpointId1),
+      {.remote_endpoint_info = ByteArray("remote endpoint")},
+      {.auto_upgrade_bandwidth = false,
+       .connection_info =
+           {
+               .medium_role = {medium_role},
+           }},
+      {}, "");
+  client.OnConnectionAccepted(std::string(kEndpointId1));
+  ecm.RegisterChannelForEndpoint(&client, std::string(kEndpointId1),
+                                 std::move(channel1));
+  bwu_manager->InitiateBwuForEndpoint(&client, std::string(kEndpointId1),
+                                      Medium::WIFI_HOTSPOT);
+  EXPECT_FALSE(bwu_manager->IsUpgradeOngoing(std::string(kEndpointId1)));
+
+  ecm.UnregisterChannelForEndpoint(
+      std::string(kEndpointId1), DisconnectionReason::LOCAL_DISCONNECTION,
+      ConnectionsLog::EstablishedConnection::SAFE_DISCONNECTION);
+  bwu_manager->Shutdown();
+  NearbyFlags::GetInstance().OverrideBoolFlagValue(
+      config_package_nearby::nearby_connections_feature::
+          kEnableDynamicRoleSwitch,
+      false);
+}
+
 class BwuManagerTestParam : public BwuManagerTest,
                             public ::testing::WithParamInterface<bool> {
  protected:
   BwuManagerTestParam() {
-    FeatureFlags::GetMutableFlagsForTesting().support_multiple_bwu_mediums =
-        GetParam();
+    SetSupportMultipleBwuMediums(GetParam());
   }
 };
 
@@ -289,12 +369,12 @@ TEST_P(BwuManagerTestParam, InitiateBwu_Success) {
       parser::FromBytes(parser::ForBwuLastWrite());
   bwu_manager_->OnIncomingFrame(last_write_frame.result(),
                                 std::string(kEndpointId1), &client_,
-                                Medium::BLUETOOTH, packet_meta_data_);
+                                Medium::BLUETOOTH);
   ExceptionOr<OfflineFrame> safe_to_close_frame =
       parser::FromBytes(parser::ForBwuSafeToClose());
   bwu_manager_->OnIncomingFrame(safe_to_close_frame.result(),
                                 std::string(kEndpointId1), &client_,
-                                Medium::BLUETOOTH, packet_meta_data_);
+                                Medium::BLUETOOTH);
 
   // Confirm that upgrade channel is resumed after initial channel is shut down.
   // Note: If we didn't grab the shared initial channel pointer above, this
@@ -400,7 +480,7 @@ TEST_P(BwuManagerTestParam,
 
 TEST_F(BwuManagerTest,
        InitiateBwu_Revert_OnDisconnect_MultipleEndpoints_FlagEnabled) {
-  FeatureFlags::GetMutableFlagsForTesting().support_multiple_bwu_mediums = true;
+  SetSupportMultipleBwuMediums(true);
 
   // Say we have two already upgraded WebRTC connections for the same service.
   CreateInitialEndpoint(&client_, kServiceIdA, kEndpointId1, Medium::BLUETOOTH);
@@ -449,8 +529,7 @@ TEST_F(BwuManagerTest,
 
 TEST_F(BwuManagerTest,
        InitiateBwu_Revert_OnDisconnect_MultipleEndpoints_FlagDisabled) {
-  FeatureFlags::GetMutableFlagsForTesting().support_multiple_bwu_mediums =
-      false;
+  SetSupportMultipleBwuMediums(false);
 
   // Say we have two already upgraded WebRTC connections for the same service.
   CreateInitialEndpoint(&client_, kServiceIdA, kEndpointId1, Medium::BLUETOOTH);
@@ -506,7 +585,7 @@ TEST_F(BwuManagerTest,
 
 TEST_F(BwuManagerTest,
        InitiateBwu_Revert_OnDisconnect_MultipleServices_FlagEnabled) {
-  FeatureFlags::GetMutableFlagsForTesting().support_multiple_bwu_mediums = true;
+  SetSupportMultipleBwuMediums(true);
 
   // Say we have two already upgraded WLAN connections for different services.
   CreateInitialEndpoint(&client_, kServiceIdA, kEndpointId1, Medium::BLUETOOTH);
@@ -560,8 +639,7 @@ TEST_F(BwuManagerTest,
 
 TEST_F(BwuManagerTest,
        InitiateBwu_Revert_OnDisconnect_MultipleServices_FlagDisabled) {
-  FeatureFlags::GetMutableFlagsForTesting().support_multiple_bwu_mediums =
-      false;
+  SetSupportMultipleBwuMediums(false);
 
   // Say we have two already upgraded WLAN connections for different services.
   CreateInitialEndpoint(&client_, kServiceIdA, kEndpointId1, Medium::BLUETOOTH);
@@ -619,7 +697,7 @@ TEST_F(
     BwuManagerTest,
     InitiateBwu_Revert_OnDisconnect_MultipleServicesAndEndpoints_FlagEnabled) {
   // Need support_multiple_bwu_mediums_ to run this test with multiple mediums.
-  FeatureFlags::GetMutableFlagsForTesting().support_multiple_bwu_mediums = true;
+  SetSupportMultipleBwuMediums(true);
 
   // Say we have three upgraded connections for two different services and two
   // different mediums.
@@ -768,7 +846,7 @@ TEST_F(
 }
 
 TEST_F(BwuManagerTest, InitiateBwu_Revert_OnUpgradeFailure_FlagEnabled) {
-  FeatureFlags::GetMutableFlagsForTesting().support_multiple_bwu_mediums = true;
+  SetSupportMultipleBwuMediums(true);
 
   // Say we have two already upgraded WebRTC connections for service A.
   CreateInitialEndpoint(&client_, kServiceIdA, kEndpointId1, Medium::BLUETOOTH);
@@ -786,13 +864,13 @@ TEST_F(BwuManagerTest, InitiateBwu_Revert_OnUpgradeFailure_FlagEnabled) {
       /*initialize_call_index=*/2u, bwu_manager_.get());
 
   // This upgrade fails.
-  BwuHandler::UpgradePathInfo info;
-  info.set_medium(BwuHandler::UpgradePathInfo::WEB_RTC);
+  BandwidthUpgradeNegotiationFrame::UpgradePathInfo info;
+  info.set_medium(BandwidthUpgradeNegotiationFrame::UpgradePathInfo::WEB_RTC);
   ExceptionOr<OfflineFrame> upgrade_failure =
       parser::FromBytes(parser::ForBwuFailure(info));
   bwu_manager_->OnIncomingFrame(upgrade_failure.result(),
                                 std::string(kEndpointId3), &client_,
-                                Medium::WEB_RTC, packet_meta_data_);
+                                Medium::WEB_RTC);
 
   // With the flag enabled, we can safely revert WebRTC just for service B
   // because service B has no active WebRTC endpoints.
@@ -805,8 +883,7 @@ TEST_F(BwuManagerTest, InitiateBwu_Revert_OnUpgradeFailure_FlagEnabled) {
 }
 
 TEST_F(BwuManagerTest, InitiateBwu_Revert_OnUpgradeFailure_FlagDisabled) {
-  FeatureFlags::GetMutableFlagsForTesting().support_multiple_bwu_mediums =
-      false;
+  SetSupportMultipleBwuMediums(false);
 
   // Say we have two already upgraded WebRTC connections for service A.
   CreateInitialEndpoint(&client_, kServiceIdA, kEndpointId1, Medium::BLUETOOTH);
@@ -824,13 +901,13 @@ TEST_F(BwuManagerTest, InitiateBwu_Revert_OnUpgradeFailure_FlagDisabled) {
       /*initialize_call_index=*/2u, bwu_manager_.get());
 
   // This upgrade fails.
-  BwuHandler::UpgradePathInfo info;
-  info.set_medium(BwuHandler::UpgradePathInfo::WEB_RTC);
+  BandwidthUpgradeNegotiationFrame::UpgradePathInfo info;
+  info.set_medium(BandwidthUpgradeNegotiationFrame::UpgradePathInfo::WEB_RTC);
   ExceptionOr<OfflineFrame> upgrade_failure =
       parser::FromBytes(parser::ForBwuFailure(info));
   bwu_manager_->OnIncomingFrame(upgrade_failure.result(),
                                 std::string(kEndpointId3), &client_,
-                                Medium::WEB_RTC, packet_meta_data_);
+                                Medium::WEB_RTC);
 
   // With the flag disabled, we don't revert if there are still connected
   // endpoints for _any_ service. We don't have service-level bookkeeping; we
@@ -842,24 +919,25 @@ TEST_F(BwuManagerTest, InitiateBwu_Revert_OnUpgradeFailure_FlagDisabled) {
 }
 
 TEST_F(BwuManagerTest, InitiateBwu_Revert_OnDisconnect_WifiDirect) {
-  FeatureFlags::GetMutableFlagsForTesting().support_multiple_bwu_mediums = true;
+  SetSupportMultipleBwuMediums(true);
   OfflineFrame frame;
   CreateInitialEndpoint(&client_, kServiceIdA, kEndpointId1, Medium::BLUETOOTH);
 
-  ByteArray bytes = parser::ForBwuWifiDirectPathAvailable(
-      /*ssid=*/"Direct-12345678", /*password=*/"87654321", /*port=*/2143,
+  std::string bytes = parser::ForBwuWifiDirectPathAvailable(
+      /*ssid=*/"", /*password=*/"", /*port=*/2143,
       /*frequency=*/2412, /*supports_disabling_encryption=*/false,
-      /*gateway=*/"123.234.23.1");
-  frame.ParseFromString(std::string(bytes));
+      /*gateway=*/"123.234.23.1", /*service_name=*/"NC-WifiDirectTest",
+      /*pin=*/"b592f7d3");
+  frame.ParseFromString(bytes);
 
   ::nearby::connections::V1Frame* v1_frame = frame.mutable_v1();
   ::nearby::connections::BandwidthUpgradeNegotiationFrame* sub_frame =
       v1_frame->mutable_bandwidth_upgrade_negotiation();
-  ::nearby::connections::BandwidthUpgradeNegotiationFrame_UpgradePathInfo*
+  BandwidthUpgradeNegotiationFrame::UpgradePathInfo*
       upgrade_path_info = sub_frame->mutable_upgrade_path_info();
   upgrade_path_info->set_supports_client_introduction_ack(false);
   bwu_manager_->OnIncomingFrame(frame, std::string(kEndpointId1), &client_,
-                                Medium::BLUETOOTH, packet_meta_data_);
+                                Medium::BLUETOOTH);
   CountDownLatch latch(1);
   bwu_manager_->OnEndpointDisconnect(&client_, (std::string)kServiceIdA,
                                      std::string(kEndpointId1), latch,
@@ -875,15 +953,15 @@ TEST_F(BwuManagerTest, InitiateBwu_Revert_OnDisconnect_WifiDirect) {
 }
 
 TEST_F(BwuManagerTest, InitiateBwu_Revert_OnDisconnect_Hotspot) {
-  FeatureFlags::GetMutableFlagsForTesting().support_multiple_bwu_mediums = true;
+  SetSupportMultipleBwuMediums(true);
 
   CreateInitialEndpoint(&client_, kServiceIdA, kEndpointId1, Medium::BLUETOOTH);
 
   ExceptionOr<OfflineFrame> hotspot_path_available_frame =
       parser::FromBytes(parser::ForBwuWifiHotspotPathAvailable(
-          /*ssid=*/"Direct-357a2d8c", /*password=*/"b592f7d3",
-          /*port=*/1234, /*frequency=*/2412, /*gateway=*/"123.234.23.1",
-          false));
+          CreateWifiHotspotCredentials(),
+          /*supports_disabling_encryption=*/false));
+  ASSERT_TRUE(hotspot_path_available_frame.ok());
   OfflineFrame frame = hotspot_path_available_frame.result();
   frame.set_version(OfflineFrame::V1);
   auto* v1_frame = frame.mutable_v1();
@@ -894,7 +972,7 @@ TEST_F(BwuManagerTest, InitiateBwu_Revert_OnDisconnect_Hotspot) {
   upgrade_path_info->set_supports_client_introduction_ack(false);
   upgrade_path_info->set_supports_disabling_encryption(true);
   bwu_manager_->OnIncomingFrame(frame, std::string(kEndpointId1), &client_,
-                                Medium::BLUETOOTH, packet_meta_data_);
+                                Medium::BLUETOOTH);
   CountDownLatch latch(1);
   bwu_manager_->OnEndpointDisconnect(&client_, (std::string)kServiceIdA,
                                      std::string(kEndpointId1), latch,
@@ -905,13 +983,13 @@ TEST_F(BwuManagerTest, InitiateBwu_Revert_OnDisconnect_Hotspot) {
 }
 
 TEST_F(BwuManagerTest, InitiateBwu_Revert_OnDisconnect_Wlan) {
-  FeatureFlags::GetMutableFlagsForTesting().support_multiple_bwu_mediums = true;
+  SetSupportMultipleBwuMediums(true);
 
   CreateInitialEndpoint(&client_, kServiceIdA, kEndpointId1, Medium::BLUETOOTH);
 
-  ExceptionOr<OfflineFrame> wlan_path_available_frame = parser::FromBytes(
-      parser::ForBwuWifiLanPathAvailable(/*ip_address=*/"ABCD",
-                                         /*port=*/1234));
+  ExceptionOr<OfflineFrame> wlan_path_available_frame =
+      parser::FromBytes(parser::ForBwuWifiLanPathAvailable(
+          {ServiceAddress{.address = {'A', 'B', 'C', 'D'}, .port = 1234}}));
   OfflineFrame frame = wlan_path_available_frame.result();
   frame.set_version(OfflineFrame::V1);
   auto* v1_frame = frame.mutable_v1();
@@ -922,7 +1000,7 @@ TEST_F(BwuManagerTest, InitiateBwu_Revert_OnDisconnect_Wlan) {
   upgrade_path_info->set_supports_client_introduction_ack(false);
 
   bwu_manager_->OnIncomingFrame(frame, std::string(kEndpointId1), &client_,
-                                Medium::BLUETOOTH, packet_meta_data_);
+                                Medium::BLUETOOTH);
   CountDownLatch latch(1);
   bwu_manager_->OnEndpointDisconnect(&client_, (std::string)kServiceIdA,
                                      std::string(kEndpointId1), latch,
@@ -948,8 +1026,8 @@ TEST_F(BwuManagerTest, BlockBwuFrameBeforeAccept) {
 
   ExceptionOr<OfflineFrame> hotspot_path_available_frame2 =
       parser::FromBytes(parser::ForBwuWifiHotspotPathAvailable(
-          /*ssid=*/"Direct-357a2d8c", /*password=*/"b592f7d3",
-          /*port=*/1234, /*frequency=*/2412, /*gateway=*/"123.234.23.1", true));
+          CreateWifiHotspotCredentials(),
+          /*supports_disabling_encryption=*/true));
   OfflineFrame frame2 = hotspot_path_available_frame2.result();
   frame2.set_version(OfflineFrame::V1);
   auto* v1_frame2 = frame2.mutable_v1();
@@ -961,7 +1039,7 @@ TEST_F(BwuManagerTest, BlockBwuFrameBeforeAccept) {
   upgrade_path_info2->set_supports_client_introduction_ack(false);
   upgrade_path_info2->set_supports_disabling_encryption(true);
   bwu_manager_->OnIncomingFrame(frame2, std::string(kEndpointId2), &client_,
-                                Medium::BLUETOOTH, packet_meta_data_);
+                                Medium::BLUETOOTH);
   CountDownLatch latch2(1);
   // The BWU frame should be drop, so the inProgressUpgrades should be empty.
   ASSERT_EQ(bwu_manager_->IsUpgradeOngoing(std::string(kEndpointId2)), false);
@@ -971,8 +1049,8 @@ TEST_F(BwuManagerTest, BlockBwuFrameBeforeAccept) {
 TEST_F(BwuManagerTest, BlockBwuFrameFromAdvertiser) {
   ExceptionOr<OfflineFrame> hotspot_path_available_frame =
       parser::FromBytes(parser::ForBwuWifiHotspotPathAvailable(
-          /*ssid=*/"Direct-357a2d8c", /*password=*/"b592f7d3",
-          /*port=*/1234, /*frequency=*/2412, /*gateway=*/"123.234.23.1", true));
+          CreateWifiHotspotCredentials(),
+          /*supports_disabling_encryption=*/true));
   OfflineFrame frame = hotspot_path_available_frame.result();
   frame.set_version(OfflineFrame::V1);
   auto* v1_frame = frame.mutable_v1();
@@ -1005,7 +1083,7 @@ TEST_F(BwuManagerTest, BlockBwuFrameFromAdvertiser) {
   EXPECT_TRUE(client_.IsConnectedToEndpoint(std::string(kEndpointId2)));
 
   bwu_manager_->OnIncomingFrame(frame, std::string(kEndpointId2), &client_,
-                                Medium::BLUETOOTH, packet_meta_data_);
+                                Medium::BLUETOOTH);
   CountDownLatch latch2(1);
   // The BWU frame should be drop, so the IsUpgradeOngoing should be empty.
   ASSERT_EQ(bwu_manager_->IsUpgradeOngoing(std::string(kEndpointId2)), false);

@@ -15,11 +15,11 @@
 #include "connections/implementation/mediums/webrtc/connection_flow.h"
 
 #include <memory>
-#include <string>
 #include <utility>
 #include <vector>
 
 #include "gtest/gtest.h"
+#include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "connections/implementation/mediums/webrtc/data_channel_listener.h"
 #include "connections/implementation/mediums/webrtc/local_ice_candidate_listener.h"
@@ -47,8 +47,8 @@ class ConnectionFlowTest : public ::testing::Test {
   ~ConnectionFlowTest() override { MediumEnvironment::Instance().Stop(); }
 };
 
-std::unique_ptr<webrtc::IceCandidateInterface> CopyCandidate(
-    const webrtc::IceCandidateInterface* candidate) {
+std::unique_ptr<webrtc::IceCandidate> CopyCandidate(
+    const webrtc::IceCandidate* candidate) {
   return webrtc::CreateIceCandidate(candidate->sdp_mid(),
                                     candidate->sdp_mline_index(),
                                     candidate->candidate());
@@ -68,8 +68,8 @@ TEST_F(ConnectionFlowTest, SuccessfulOfferAnswerFlow) {
   // Send Ice Candidates immediately when you retrieve them
   offerer = ConnectionFlow::Create(
       {.local_ice_candidate_found_cb =
-           [&answerer](const webrtc::IceCandidateInterface* candidate) {
-             std::vector<std::unique_ptr<webrtc::IceCandidateInterface>> vec;
+           [&answerer](const webrtc::IceCandidate* candidate) {
+             std::vector<std::unique_ptr<webrtc::IceCandidate>> vec;
              vec.push_back(CopyCandidate(candidate));
              // The callback might be alive while the objects in test are
              // destroyed.
@@ -81,15 +81,15 @@ TEST_F(ConnectionFlowTest, SuccessfulOfferAnswerFlow) {
              offerer_socket_future.Set(std::move(socket));
            }},
       {.adapter_type_changed_cb =
-           [](rtc::AdapterType adapter_type) {
+           [](webrtc::AdapterType adapter_type) {
              // Do nothing
            }},
       webrtc_medium_offerer);
   ASSERT_NE(offerer, nullptr);
   answerer = ConnectionFlow::Create(
       {.local_ice_candidate_found_cb =
-           [&offerer](const webrtc::IceCandidateInterface* candidate) {
-             std::vector<std::unique_ptr<webrtc::IceCandidateInterface>> vec;
+           [&offerer](const webrtc::IceCandidate* candidate) {
+             std::vector<std::unique_ptr<webrtc::IceCandidate>> vec;
              vec.push_back(CopyCandidate(candidate));
              // The callback might be alive while the objects in test are
              // destroyed.
@@ -101,7 +101,7 @@ TEST_F(ConnectionFlowTest, SuccessfulOfferAnswerFlow) {
              answerer_socket_future.Set(std::move(socket));
            }},
       {.adapter_type_changed_cb =
-           [](rtc::AdapterType adapter_type) {
+           [](webrtc::AdapterType adapter_type) {
              // Do nothing
            }},
       webrtc_medium_answerer);
@@ -130,13 +130,12 @@ TEST_F(ConnectionFlowTest, SuccessfulOfferAnswerFlow) {
   EXPECT_TRUE(answerer_socket.ok());
 
   // Send message on data channel
-  const char message[] = "Test";
-  offerer_socket.result().GetImpl().GetOutputStream().Write(
-      ByteArray(message, 4));
+  absl::string_view message = "Test";
+  offerer_socket.result().GetImpl().GetOutputStream().Write(message);
   ExceptionOr<ByteArray> received_message =
       answerer_socket.result().GetImpl().GetInputStream().Read(4);
   EXPECT_TRUE(received_message.ok());
-  EXPECT_EQ(received_message.result(), ByteArray{message});
+  EXPECT_EQ(received_message.result(), ByteArray{message.data()});
 }
 
 TEST_F(ConnectionFlowTest, CreateAnswerBeforeOfferReceived) {
@@ -267,8 +266,8 @@ TEST_F(ConnectionFlowTest, TerminateAnswerer) {
   // Send Ice Candidates immediately when you retrieve them
   offerer = ConnectionFlow::Create(
       {.local_ice_candidate_found_cb =
-           [&answerer](const webrtc::IceCandidateInterface* candidate) {
-             std::vector<std::unique_ptr<webrtc::IceCandidateInterface>> vec;
+           [&answerer](const webrtc::IceCandidate* candidate) {
+             std::vector<std::unique_ptr<webrtc::IceCandidate>> vec;
              vec.push_back(CopyCandidate(candidate));
              // The callback might be alive while the objects in test are
              // destroyed.
@@ -280,15 +279,15 @@ TEST_F(ConnectionFlowTest, TerminateAnswerer) {
              offerer_socket_future.Set(std::move(socket));
            }},
       {.adapter_type_changed_cb =
-           [](rtc::AdapterType adapter_type) {
+           [](webrtc::AdapterType adapter_type) {
              // Do nothing
            }},
       webrtc_medium_offerer);
   ASSERT_NE(offerer, nullptr);
   answerer = ConnectionFlow::Create(
       {.local_ice_candidate_found_cb =
-           [&offerer](const webrtc::IceCandidateInterface* candidate) {
-             std::vector<std::unique_ptr<webrtc::IceCandidateInterface>> vec;
+           [&offerer](const webrtc::IceCandidate* candidate) {
+             std::vector<std::unique_ptr<webrtc::IceCandidate>> vec;
              vec.push_back(CopyCandidate(candidate));
              // The callback might be alive while the objects in test are
              // destroyed.
@@ -300,9 +299,9 @@ TEST_F(ConnectionFlowTest, TerminateAnswerer) {
              answerer_socket_future.Set(std::move(wrapper));
            }},
       {.adapter_type_changed_cb =
-           [](rtc::AdapterType adapter_type) {
-             EXPECT_GE(adapter_type, rtc::ADAPTER_TYPE_UNKNOWN);
-             EXPECT_LE(adapter_type, rtc::ADAPTER_TYPE_CELLULAR_5G);
+           [](webrtc::AdapterType adapter_type) {
+             EXPECT_GE(adapter_type, webrtc::ADAPTER_TYPE_UNKNOWN);
+             EXPECT_LE(adapter_type, webrtc::ADAPTER_TYPE_CELLULAR_5G);
            }},
       webrtc_medium_answerer);
   ASSERT_NE(answerer, nullptr);
@@ -338,8 +337,8 @@ TEST_F(ConnectionFlowTest, TerminateAnswerer) {
   latch.Await();
 
   // Send message on data channel
-  std::string message = "Test";
-  offerer_socket.result().GetOutputStream().Write(ByteArray{message});
+  absl::string_view message = "Test";
+  offerer_socket.result().GetOutputStream().Write(message);
   ExceptionOr<ByteArray> received_message =
       answerer_socket.result().GetInputStream().Read(4);
   EXPECT_TRUE(received_message.GetResult().Empty());
@@ -357,8 +356,8 @@ TEST_F(ConnectionFlowTest, TerminateOfferer) {
   // Send Ice Candidates immediately when you retrieve them
   offerer = ConnectionFlow::Create(
       {.local_ice_candidate_found_cb =
-           [&answerer](const webrtc::IceCandidateInterface* candidate) {
-             std::vector<std::unique_ptr<webrtc::IceCandidateInterface>> vec;
+           [&answerer](const webrtc::IceCandidate* candidate) {
+             std::vector<std::unique_ptr<webrtc::IceCandidate>> vec;
              vec.push_back(CopyCandidate(candidate));
              // The callback might be alive while the objects in test are
              // destroyed.
@@ -370,16 +369,16 @@ TEST_F(ConnectionFlowTest, TerminateOfferer) {
              offerer_socket_future.Set(std::move(socket));
            }},
       {.adapter_type_changed_cb =
-           [](rtc::AdapterType adapter_type) {
-             EXPECT_GE(adapter_type, rtc::ADAPTER_TYPE_UNKNOWN);
-             EXPECT_LE(adapter_type, rtc::ADAPTER_TYPE_CELLULAR_5G);
+           [](webrtc::AdapterType adapter_type) {
+             EXPECT_GE(adapter_type, webrtc::ADAPTER_TYPE_UNKNOWN);
+             EXPECT_LE(adapter_type, webrtc::ADAPTER_TYPE_CELLULAR_5G);
            }},
       webrtc_medium_offerer);
   ASSERT_NE(offerer, nullptr);
   answerer = ConnectionFlow::Create(
       {.local_ice_candidate_found_cb =
-           [&offerer](const webrtc::IceCandidateInterface* candidate) {
-             std::vector<std::unique_ptr<webrtc::IceCandidateInterface>> vec;
+           [&offerer](const webrtc::IceCandidate* candidate) {
+             std::vector<std::unique_ptr<webrtc::IceCandidate>> vec;
              vec.push_back(CopyCandidate(candidate));
              // The callback might be alive while the objects in test are
              // destroyed.
@@ -391,9 +390,9 @@ TEST_F(ConnectionFlowTest, TerminateOfferer) {
              answerer_socket_future.Set(std::move(wrapper));
            }},
       {.adapter_type_changed_cb =
-           [](rtc::AdapterType adapter_type) {
-             EXPECT_GE(adapter_type, rtc::ADAPTER_TYPE_UNKNOWN);
-             EXPECT_LE(adapter_type, rtc::ADAPTER_TYPE_CELLULAR_5G);
+           [](webrtc::AdapterType adapter_type) {
+             EXPECT_GE(adapter_type, webrtc::ADAPTER_TYPE_UNKNOWN);
+             EXPECT_LE(adapter_type, webrtc::ADAPTER_TYPE_CELLULAR_5G);
            }},
       webrtc_medium_answerer);
   ASSERT_NE(answerer, nullptr);
@@ -429,8 +428,8 @@ TEST_F(ConnectionFlowTest, TerminateOfferer) {
   latch.Await();
 
   // Send message on data channel
-  std::string message = "Test";
-  offerer_socket.result().GetOutputStream().Write(ByteArray{message});
+  absl::string_view message = "Test";
+  offerer_socket.result().GetOutputStream().Write(message);
   ExceptionOr<ByteArray> received_message =
       answerer_socket.result().GetInputStream().Read(4);
   EXPECT_TRUE(received_message.GetResult().Empty());

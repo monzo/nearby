@@ -1,3 +1,5 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
 # Copyright 2020 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -40,11 +42,14 @@ cc_library(
         "dnsapi.lib",
         "wlanapi.lib",
         "shlwapi.lib",
+        "runtimeobject.lib",
     ],
     visibility = [
         "//internal:__subpackages__",
         "//internal/platform/implementation/windows:__subpackages__",
         "//location/nearby/apps/better_together/plugins:__subpackages__",
+        "//location/nearby/apps/better_together/windows/nearby_share:__subpackages__",
         "//sharing:__subpackages__",
+        "//third_party/nearby:winrt_users",
     ],
 )

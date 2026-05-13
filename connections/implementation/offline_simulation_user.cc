@@ -13,15 +13,26 @@
 // limitations under the License.
 
 #include "connections/implementation/offline_simulation_user.h"
+#include <functional>
+#include <string>
+#include <utility>
 
 #include "absl/functional/any_invocable.h"
 #include "absl/functional/bind_front.h"
+#include "absl/strings/string_view.h"
+#include "absl/time/time.h"
+#include "connections/advertising_options.h"
+#include "connections/discovery_options.h"
 #include "connections/listeners.h"
+#include "connections/out_of_band_connection_metadata.h"
+#include "connections/payload.h"
+#include "connections/status.h"
 #include "internal/interop/device.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/count_down_latch.h"
+#include "internal/platform/future.h"
 #include "internal/platform/logging.h"
-#include "internal/platform/system_clock.h"
+#include "internal/platform/mutex_lock.h"
 
 namespace nearby {
 namespace connections {
@@ -30,9 +41,9 @@ void OfflineSimulationUser::OnConnectionInitiated(
     const std::string& endpoint_id, const ConnectionResponseInfo& info,
     bool is_outgoing) {
   if (is_outgoing) {
-    NEARBY_LOGS(INFO) << "RequestConnection: initiated_cb called";
+    LOG(INFO) << "RequestConnection: initiated_cb called";
   } else {
-    NEARBY_LOGS(INFO) << "StartAdvertising: initiated_cb called";
+    LOG(INFO) << "StartAdvertising: initiated_cb called";
     discovered_ = DiscoveredInfo{
         .endpoint_id = endpoint_id,
         .endpoint_info = GetInfo(),
@@ -54,15 +65,14 @@ void OfflineSimulationUser::OnConnectionRejected(const std::string& endpoint_id,
 
 void OfflineSimulationUser::OnEndpointDisconnect(
     const std::string& endpoint_id) {
-  NEARBY_LOGS(INFO) << "OnEndpointDisconnect: self=" << this
-                    << "; id=" << endpoint_id;
+  LOG(INFO) << "OnEndpointDisconnect: self=" << this << "; id=" << endpoint_id;
   if (disconnect_latch_) disconnect_latch_->CountDown();
 }
 
 void OfflineSimulationUser::OnEndpointFound(const std::string& endpoint_id,
                                             const ByteArray& endpoint_info,
                                             const std::string& service_id) {
-  NEARBY_LOGS(INFO) << "Device discovered: id=" << endpoint_id;
+  LOG(INFO) << "Device discovered: id=" << endpoint_id;
   discovered_ = DiscoveredInfo{
       .endpoint_id = endpoint_id,
       .endpoint_info = endpoint_info,
@@ -229,7 +239,7 @@ Status OfflineSimulationUser::RejectConnection(CountDownLatch* latch) {
 }
 
 void OfflineSimulationUser::Disconnect() {
-  NEARBY_LOGS(INFO) << "Disconnecting from id=" << discovered_.endpoint_id;
+  LOG(INFO) << "Disconnecting from id=" << discovered_.endpoint_id;
   ctrl_.DisconnectFromEndpoint(&client_, discovered_.endpoint_id);
 }
 

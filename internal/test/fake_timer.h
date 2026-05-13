@@ -31,9 +31,8 @@ class FakeTimer : public Timer {
 
   bool Start(int delay, int period,
              absl::AnyInvocable<void()> callback) override;
-  bool Stop() override;
+  void Stop() override;
   bool IsRunning() override;
-  bool FireNow() override;
 
  private:
   struct TimerData {
@@ -49,7 +48,7 @@ class FakeTimer : public Timer {
   void ClockUpdated();
   bool InternalStart(int delay, int period,
                      absl::AnyInvocable<void()> callback);
-  bool InternalStop();
+  void InternalStop();
 
   mutable RecursiveMutex mutex_;
   FakeClock* clock_ = nullptr;

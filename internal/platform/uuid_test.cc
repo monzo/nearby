@@ -54,7 +54,7 @@ TEST(UuidTest, CreateFromStringWithMd5) {
   std::string uuid_str(uuid);
   std::array<char, 16> uuid_data = uuid.data();
   std::string md5_data(Crypto::Md5(kString));
-  NEARBY_LOGS(INFO) << "MD5-based UUID: " << uuid_str;
+  LOG(INFO) << "MD5-based UUID: " << uuid_str;
   uuid_data[6] = 0;
   uuid_data[8] = 0;
   md5_data[6] = 0;
@@ -66,7 +66,7 @@ TEST(UuidTest, CreateFromBinaryCanOutputString) {
   Uuid uuid(kCopresenceServiceUuidMsb, kCopresenceServiceUuidLsb);
   std::array<char, 16> uuid_data = uuid.data();
   std::string uuid_str(uuid);
-  NEARBY_LOGS(INFO) << "UUID: " << uuid_str;
+  LOG(INFO) << "UUID: " << uuid_str;
   EXPECT_EQ(uuid_data[0],
             static_cast<char>((kCopresenceServiceUuidMsb >> 56) & 0xFF));
   EXPECT_EQ(uuid_data[1],
@@ -141,6 +141,37 @@ TEST(UuidTest, ConstructUuidFromString) {
 
   ASSERT_TRUE(a.has_value());
   EXPECT_EQ(std::string(*a), "12345678-1234-1234-1234-123456789012");
+}
+
+TEST(UuidTest, GetBtUuid16Succeeds) {
+  std::optional<Uuid> a =
+      Uuid::FromString("0000ABCD-0000-1000-8000-00805F9B34FB");
+  ASSERT_TRUE(a.has_value());
+
+  std::optional<uint16_t> bt_uuid16 = a->GetBtUuid16();
+
+  ASSERT_TRUE(bt_uuid16.has_value());
+  EXPECT_EQ(bt_uuid16, 0xABCD);
+}
+
+TEST(UuidTest, GetBtUuid16FailsMsb) {
+  std::optional<Uuid> a =
+      Uuid::FromString("0100ABCD-0000-1000-8000-00805F9B34FB");
+  ASSERT_TRUE(a.has_value());
+
+  std::optional<uint16_t> bt_uuid16 = a->GetBtUuid16();
+
+  EXPECT_FALSE(bt_uuid16.has_value());
+}
+
+TEST(UuidTest, GetBtUuid16FailsLsb) {
+  std::optional<Uuid> a =
+      Uuid::FromString("0000ABCD-0000-1000-8000-00905F9B34FB");
+  ASSERT_TRUE(a.has_value());
+
+  std::optional<uint16_t> bt_uuid16 = a->GetBtUuid16();
+
+  EXPECT_FALSE(bt_uuid16.has_value());
 }
 
 }  // namespace

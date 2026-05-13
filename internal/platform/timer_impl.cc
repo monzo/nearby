@@ -16,48 +16,49 @@
 
 #include <utility>
 
-#include "absl/time/clock.h"
+#include "absl/functional/any_invocable.h"
+#include "absl/synchronization/mutex.h"
+#include "internal/platform/implementation/platform.h"
 #include "internal/platform/logging.h"
 
 namespace nearby {
 
 bool TimerImpl::Start(int delay, int period,
                       absl::AnyInvocable<void()> callback) {
+  if (delay < 0) {
+    delay = 0;
+  }
+  if (period < 0) {
+    period = 0;
+  }
+  absl::MutexLock lock(mutex_);
   if (internal_timer_ != nullptr) {
-    NEARBY_LOGS(INFO) << "The timer is already running.";
+    LOG(INFO) << "The timer is already running.";
     return false;
   }
 
-  delay_ = delay;
-  period_ = period;
   internal_timer_ = api::ImplementationPlatform::CreateTimer();
   if (!internal_timer_->Create(delay, period, std::move(callback))) {
-    NEARBY_LOGS(INFO) << "Failed to create timer.";
+    LOG(INFO) << "Failed to create timer.";
     internal_timer_ = nullptr;
     return false;
   }
   return true;
 }
 
-bool TimerImpl::Stop() {
+void TimerImpl::Stop() {
+  absl::MutexLock lock(mutex_);
   if (internal_timer_ == nullptr) {
-    return true;
+    return;
   }
-  if (internal_timer_->Stop()) {
-    internal_timer_ = nullptr;
-    return true;
-  }
-  return false;
+  // Stop returns false if timer has already fired.  We can ignore that.
+  internal_timer_->Stop();
+  internal_timer_ = nullptr;
 }
 
-bool TimerImpl::IsRunning() { return (internal_timer_ != nullptr); }
-
-bool TimerImpl::FireNow() {
-  if (IsRunning()) {
-    return internal_timer_->FireNow();
-  }
-
-  return false;
+bool TimerImpl::IsRunning() {
+  absl::MutexLock lock(mutex_);
+  return (internal_timer_ != nullptr);
 }
 
 }  // namespace nearby

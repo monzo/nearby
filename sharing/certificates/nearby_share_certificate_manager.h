@@ -27,7 +27,6 @@
 #include "sharing/certificates/nearby_share_decrypted_public_certificate.h"
 #include "sharing/certificates/nearby_share_encrypted_metadata_key.h"
 #include "sharing/certificates/nearby_share_private_certificate.h"
-#include "sharing/common/nearby_share_enums.h"
 #include "sharing/proto/rpc_resources.pb.h"
 
 namespace nearby {
@@ -70,8 +69,8 @@ class NearbyShareCertificateManager {
   void RemoveObserver(Observer* observer);
 
   // Starts/Stops certificate task scheduling.
-  void Start();
-  void Stop();
+  void StartScheduledTasks();
+  void StopScheduledTasks();
   bool is_running() { return is_running_; }
 
   // Encrypts the metadata encryption key of the currently valid private
@@ -96,16 +95,6 @@ class NearbyShareCertificateManager {
       proto::DeviceVisibility visibility,
       absl::Span<const uint8_t> authentication_token) const;
 
-  // Returns all local device private certificates of |visibility| converted to
-  // public certificates. The public certificates' for_selected_contacts fields
-  // will be set to reflect the |visibility|. NOTE: Only certificates with the
-  // requested visibility will be returned; if selected-contacts visibility is
-  // passed in, the all-contacts visibility certificates will *not* be returned
-  // as well.
-  virtual std::vector<nearby::sharing::proto::PublicCertificate>
-  GetPrivateCertificatesAsPublicCertificates(
-      proto::DeviceVisibility visibility) = 0;
-
   // Returns in |callback| the public certificate that is able to be decrypted
   // using |encrypted_metadata_key|, and returns absl::nullopt if no such public
   // certificate exists.
@@ -119,9 +108,9 @@ class NearbyShareCertificateManager {
   // OnPublicCertificatesDownloaded().
   virtual void DownloadPublicCertificates() = 0;
 
-  // Checks the expiration of the private certificates and Refreshes if needed.
-  // If force_upload is true, the private certificates will always be uploaded.
-  virtual void PrivateCertificateRefresh(bool force_upload) = 0;
+  // Checks the expiration of the private certificates and Refreshes if needed,
+  // then upload to the server and refresh the contacts list.
+  virtual void ForceUploadPrivateCertificates() = 0;
 
   // Clears all public certificates. when account logout,the public certificates
   // should be cleared.
@@ -134,8 +123,8 @@ class NearbyShareCertificateManager {
   virtual std::string Dump() const = 0;
 
  protected:
-  virtual void OnStart() = 0;
-  virtual void OnStop() = 0;
+  virtual void OnStartScheduledTasks() = 0;
+  virtual void OnStopScheduledTasks() = 0;
 
   // Returns the currently valid private certificate with |visibility|, or
   // returns std::nullopt if one does not exist.

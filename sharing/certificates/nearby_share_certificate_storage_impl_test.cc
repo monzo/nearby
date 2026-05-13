@@ -38,8 +38,9 @@
 #include "sharing/certificates/nearby_share_certificate_storage.h"
 #include "sharing/certificates/nearby_share_private_certificate.h"
 #include "sharing/certificates/test_util.h"
-#include "sharing/common/nearby_share_prefs.h"
 #include "sharing/internal/api/mock_public_certificate_db.h"
+#include "sharing/internal/api/private_certificate_data.h"
+#include "sharing/internal/public/pref_names.h"
 #include "sharing/internal/test/fake_preference_manager.h"
 #include "sharing/internal/test/fake_public_certificate_db.h"
 #include "sharing/proto/enums.pb.h"
@@ -103,12 +104,6 @@ constexpr char kMetadataEncryptionKey4[] = "metadataencryptionkey4";
 constexpr char kEncryptedMetadataBytes4[] = "encryptedmetadatabytes4";
 constexpr char kMetadataEncryptionKeyTag4[] = "metadataencryptionkeytag4";
 
-std::string EncodeString(absl::string_view unencoded_string) {
-  std::string result;
-  absl::WebSafeBase64Escape(unencoded_string, &result);
-  return result;
-}
-
 PublicCertificate CreatePublicCertificate(
     absl::string_view secret_id, absl::string_view secret_key,
     absl::string_view public_key, int64_t start_seconds, int32_t start_nanos,
@@ -158,10 +153,8 @@ class NearbyShareCertificateStorageImplTest : public ::testing::Test {
       NearbyShareCertificateStorageImplTest&) = delete;
 
   void SetUp() override {
-    preference_manager_.Remove(
-        prefs::kNearbySharingPublicCertificateExpirationDictName);
-    preference_manager_.Remove(
-        prefs::kNearbySharingPrivateCertificateListName);
+    preference_manager_.Remove(PrefNames::kPublicCertificateExpirationDict);
+    preference_manager_.Remove(PrefNames::kPrivateCertificateList);
   }
 
   std::map<std::string, PublicCertificate> PrepopulatePublicCertificates() {
@@ -185,13 +178,12 @@ class NearbyShareCertificateStorageImplTest : public ::testing::Test {
     std::vector<std::pair<std::string, int64_t>> expirations;
     for (const auto& cert : pub_certs) {
       expirations.emplace_back(
-          EncodeString(cert.secret_id()),
+          absl::WebSafeBase64Escape(cert.secret_id()),
           absl::ToUnixNanos(TimestampToTime(cert.end_time())));
       entries.emplace(cert.secret_id(), std::move(cert));
     }
     preference_manager_.SetCertificateExpirationArray(
-        prefs::kNearbySharingPublicCertificateExpirationDictName,
-        expirations);
+        PrefNames::kPublicCertificateExpirationDict, expirations);
     return entries;
   }
 
@@ -557,7 +549,7 @@ TEST_F(NearbyShareCertificateStorageImplTest,
 
   cert_store->RemoveExpiredPrivateCertificates(now);
 
-  certs = *cert_store->GetPrivateCertificates();
+  certs = cert_store->GetPrivateCertificates();
   ASSERT_EQ(1u, certs.size());
   for (const NearbySharePrivateCertificate& cert : certs) {
     EXPECT_LE(now, cert.not_after());
@@ -615,13 +607,13 @@ TEST_F(NearbyShareCertificateStorageImplTest, ReplaceGetPrivateCertificates) {
   auto certs_before = CreatePrivateCertificates(
       3, DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS);
   cert_store->ReplacePrivateCertificates(certs_before);
-  auto certs_after = cert_store->GetPrivateCertificates();
+  std::vector<NearbySharePrivateCertificate> certs_after =
+      cert_store->GetPrivateCertificates();
 
-  ASSERT_TRUE(certs_after.has_value());
-  ASSERT_EQ(certs_before.size(), certs_after->size());
+  ASSERT_EQ(certs_before.size(), certs_after.size());
   for (size_t i = 0; i < certs_before.size(); ++i) {
     EXPECT_EQ(certs_before[i].ToCertificateData(),
-              (*certs_after)[i].ToCertificateData());
+              certs_after[i].ToCertificateData());
   }
 
   certs_before = CreatePrivateCertificates(
@@ -629,11 +621,10 @@ TEST_F(NearbyShareCertificateStorageImplTest, ReplaceGetPrivateCertificates) {
   cert_store->ReplacePrivateCertificates(certs_before);
   certs_after = cert_store->GetPrivateCertificates();
 
-  ASSERT_TRUE(certs_after.has_value());
-  ASSERT_EQ(certs_before.size(), certs_after->size());
+  ASSERT_EQ(certs_before.size(), certs_after.size());
   for (size_t i = 0; i < certs_before.size(); ++i) {
     EXPECT_EQ(certs_before[i].ToCertificateData(),
-              (*certs_after)[i].ToCertificateData());
+              certs_after[i].ToCertificateData());
   }
   EXPECT_THAT(cert_store.use_count(), Eq(1));
 }
@@ -662,7 +653,7 @@ TEST_F(NearbyShareCertificateStorageImplTest, UpdatePrivateCertificates) {
   cert_store->UpdatePrivateCertificate(cert_to_update);
 
   std::vector<NearbySharePrivateCertificate> new_certs =
-      *cert_store->GetPrivateCertificates();
+      cert_store->GetPrivateCertificates();
   EXPECT_EQ(initial_certs.size(), new_certs.size());
   for (size_t i = 0; i < new_certs.size(); ++i) {
     NearbySharePrivateCertificate expected_cert =
@@ -683,20 +674,38 @@ TEST_F(NearbyShareCertificateStorageImplTest,
       preference_manager_, std::move(db));
   fake_db->InvokeInitStatusCallback(FakePublicCertificateDb::InitStatus::kOk);
 
+  static constexpr int kNumCerts = 3;
   auto certs = CreatePrivateCertificates(
-      3, DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS);
+      kNumCerts, DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS);
   cert_store->ReplacePrivateCertificates(certs);
-  std::optional<absl::Time> next_expiration =
-      cert_store->NextPrivateCertificateExpirationTime();
+  absl::Time next_expiration =
+      cert_store->NextPrivateCertificateExpirationTime(kNumCerts);
 
-  ASSERT_TRUE(next_expiration.has_value());
   bool found = false;
   for (auto& cert : certs) {
-    EXPECT_GE(cert.not_after(), *next_expiration);
-    if (cert.not_after() == *next_expiration) found = true;
+    EXPECT_GE(cert.not_after(), next_expiration);
+    if (cert.not_after() == next_expiration) found = true;
   }
   EXPECT_TRUE(found);
   EXPECT_THAT(cert_store.use_count(), Eq(1));
+}
+
+TEST_F(NearbyShareCertificateStorageImplTest,
+       NextPrivateCertificateExpirationTime_NotEnoughCerts) {
+  auto db = std::make_unique<nearby::FakePublicCertificateDb>(
+      PrepopulatePublicCertificates());
+  nearby::FakePublicCertificateDb* fake_db = db.get();
+
+  auto cert_store = NearbyShareCertificateStorageImpl::Factory::Create(
+      preference_manager_, std::move(db));
+  fake_db->InvokeInitStatusCallback(FakePublicCertificateDb::InitStatus::kOk);
+
+  static constexpr int kNumCerts = 3;
+  cert_store->ReplacePrivateCertificates({});
+  absl::Time next_expiration =
+      cert_store->NextPrivateCertificateExpirationTime(kNumCerts);
+
+  EXPECT_EQ(next_expiration, absl::InfinitePast());
 }
 
 TEST_F(NearbyShareCertificateStorageImplTest,
@@ -737,10 +746,10 @@ TEST_F(NearbyShareCertificateStorageImplTest, ClearPrivateCertificates) {
           3, DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS);
   cert_store->ReplacePrivateCertificates(certs_before);
   cert_store->ClearPrivateCertificates();
-  auto certs_after = cert_store->GetPrivateCertificates();
+  std::vector<NearbySharePrivateCertificate> certs_after =
+      cert_store->GetPrivateCertificates();
 
-  ASSERT_TRUE(certs_after.has_value());
-  EXPECT_EQ(0u, certs_after->size());
+  EXPECT_TRUE(certs_after.empty());
   EXPECT_THAT(cert_store.use_count(), Eq(1));
 }
 
@@ -757,56 +766,87 @@ TEST_F(NearbyShareCertificateStorageImplTest,
   std::vector<NearbySharePrivateCertificate> certs_all_contacts =
       CreatePrivateCertificates(
           3, DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS);
-  std::vector<NearbySharePrivateCertificate> certs_selected_contacts =
-      CreatePrivateCertificates(
-          3, DeviceVisibility::DEVICE_VISIBILITY_SELECTED_CONTACTS);
+  std::vector<NearbySharePrivateCertificate> certs_self =
+      CreatePrivateCertificates(3,
+                                DeviceVisibility::DEVICE_VISIBILITY_SELF_SHARE);
   std::vector<NearbySharePrivateCertificate> all_certs;
-  all_certs.reserve(certs_all_contacts.size() + certs_selected_contacts.size());
+  all_certs.reserve(certs_all_contacts.size() + certs_self.size());
   all_certs.insert(all_certs.end(), certs_all_contacts.begin(),
                    certs_all_contacts.end());
-  all_certs.insert(all_certs.end(), certs_selected_contacts.begin(),
-                   certs_selected_contacts.end());
+  all_certs.insert(all_certs.end(), certs_self.begin(), certs_self.end());
 
-  // Remove all-contacts certs then selected-contacts certs.
+  // Remove all-contacts certs then remove self certs.
   {
     cert_store->ReplacePrivateCertificates(all_certs);
     cert_store->ClearPrivateCertificatesOfVisibility(
         DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS);
-    auto certs_after = cert_store->GetPrivateCertificates();
-    ASSERT_TRUE(certs_after.has_value());
-    ASSERT_EQ(certs_selected_contacts.size(), certs_after->size());
-    for (size_t i = 0; i < certs_selected_contacts.size(); ++i) {
-      EXPECT_EQ(certs_selected_contacts[i].ToCertificateData(),
-                (*certs_after)[i].ToCertificateData());
+    std::vector<NearbySharePrivateCertificate> certs_after =
+        cert_store->GetPrivateCertificates();
+    ASSERT_EQ(certs_self.size(), certs_after.size());
+    for (size_t i = 0; i < certs_self.size(); ++i) {
+      EXPECT_EQ(certs_self[i].ToCertificateData(),
+                certs_after[i].ToCertificateData());
     }
 
     cert_store->ClearPrivateCertificatesOfVisibility(
-        DeviceVisibility::DEVICE_VISIBILITY_SELECTED_CONTACTS);
+        DeviceVisibility::DEVICE_VISIBILITY_SELF_SHARE);
     certs_after = cert_store->GetPrivateCertificates();
-    ASSERT_TRUE(certs_after.has_value());
-    EXPECT_EQ(certs_after->size(), 0u);
+    EXPECT_TRUE(certs_after.empty());
   }
 
-  // Remove selected-contacts certs then all-contacts certs.
+  // Remove self certs then remove all-contacts certs.
   {
     cert_store->ReplacePrivateCertificates(all_certs);
     cert_store->ClearPrivateCertificatesOfVisibility(
-        DeviceVisibility::DEVICE_VISIBILITY_SELECTED_CONTACTS);
-    auto certs_after = cert_store->GetPrivateCertificates();
-    ASSERT_TRUE(certs_after.has_value());
-    ASSERT_EQ(certs_all_contacts.size(), certs_after->size());
+        DeviceVisibility::DEVICE_VISIBILITY_SELF_SHARE);
+    std::vector<NearbySharePrivateCertificate> certs_after =
+        cert_store->GetPrivateCertificates();
+    ASSERT_EQ(certs_all_contacts.size(), certs_after.size());
     for (size_t i = 0; i < certs_all_contacts.size(); ++i) {
       EXPECT_EQ(certs_all_contacts[i].ToCertificateData(),
-                (*certs_after)[i].ToCertificateData());
+                certs_after[i].ToCertificateData());
     }
 
     cert_store->ClearPrivateCertificatesOfVisibility(
         DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS);
     certs_after = cert_store->GetPrivateCertificates();
-    ASSERT_TRUE(certs_after.has_value());
-    EXPECT_EQ(certs_after->size(), 0u);
+    EXPECT_TRUE(certs_after.empty());
   }
   EXPECT_THAT(cert_store.use_count(), Eq(1));
+}
+
+TEST_F(NearbyShareCertificateStorageImplTest,
+       GetPrivateCertificates_WithCorruptedCerts) {
+  auto db = std::make_unique<nearby::FakePublicCertificateDb>(
+      PrepopulatePublicCertificates());
+  nearby::FakePublicCertificateDb* fake_db = db.get();
+
+  auto cert_store = NearbyShareCertificateStorageImpl::Factory::Create(
+      preference_manager_, std::move(db));
+  fake_db->InvokeInitStatusCallback(FakePublicCertificateDb::InitStatus::kOk);
+
+  std::vector<NearbySharePrivateCertificate> certs_all_contacts =
+      CreatePrivateCertificates(
+          3, DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS);
+  cert_store->ReplacePrivateCertificates(certs_all_contacts);
+
+  std::vector<api::PrivateCertificateData> private_cert_data =
+      preference_manager_.GetPrivateCertificateArray(
+          PrefNames::kPrivateCertificateList);
+  ASSERT_EQ(private_cert_data.size(), 3u);
+  // Set to invalid base64 encoded string.
+  private_cert_data[0].key_pair = "::..\\|@#";
+  preference_manager_.SetPrivateCertificateArray(
+      PrefNames::kPrivateCertificateList, private_cert_data);
+
+  std::vector<NearbySharePrivateCertificate> certs =
+      cert_store->GetPrivateCertificates();
+
+  // Verify corrupted cert has been removed.
+  EXPECT_TRUE(certs.empty());
+  private_cert_data = preference_manager_.GetPrivateCertificateArray(
+      PrefNames::kPrivateCertificateList);
+  EXPECT_TRUE(private_cert_data.empty());
 }
 
 }  // namespace nearby::sharing

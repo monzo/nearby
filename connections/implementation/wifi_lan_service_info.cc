@@ -20,8 +20,8 @@
 
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
-#include "connections/implementation/base_pcp_handler.h"
 #include "connections/implementation/pcp.h"
+#include "connections/implementation/webrtc_state.h"
 #include "internal/platform/base64_utils.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/logging.h"
@@ -96,7 +96,7 @@ WifiLanServiceInfo::WifiLanServiceInfo(const NsdServiceInfo& nsd_service_info) {
     return;
   }
 
-  StreamReader stream_reader{service_info_bytes};
+  StreamReader stream_reader{&service_info_bytes};
   // The first 1 byte is supposed to be the version and pcp.
   auto version_and_pcp_byte = stream_reader.ReadUint8();
   if (!version_and_pcp_byte.has_value()) {

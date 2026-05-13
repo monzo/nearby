@@ -1,3 +1,6 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+
 licenses(["notice"])
 # Copyright 2022 Google LLC
 #
@@ -17,15 +20,12 @@ cc_library(
     name = "analytics",
     srcs = [
         "analytics_recorder.cc",
-        "throughput_recorder.cc",
     ],
     hdrs = [
         "advertising_metadata_params.h",
         "analytics_recorder.h",
         "connection_attempt_metadata_params.h",
         "discovery_metadata_params.h",
-        "packet_meta_data.h",
-        "throughput_recorder.h",
     ],
     copts = ["-DCORE_ADAPTER_DLL"],
     visibility = ["//connections:__subpackages__"],
@@ -33,15 +33,16 @@ cc_library(
         "//connections:core_types",
         "//internal/analytics:event_logger",
         "//internal/platform:error_code_recorder",
+        "//internal/platform:logging",
         "//internal/platform:types",
         "//internal/platform/implementation:types",
         "//internal/proto/analytics:connections_log_cc_proto",
         "//proto:connections_enums_cc_proto",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/base:no_destructor",
         "@com_google_absl//absl/container:btree",
         "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/meta:type_traits",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/time",
@@ -54,7 +55,6 @@ cc_test(
     size = "small",
     srcs = [
         "analytics_recorder_test.cc",
-        "throughput_recorder_test.cc",
     ],
     shard_count = 16,
     deps = [
@@ -63,9 +63,12 @@ cc_test(
         "//internal/analytics:mock_event_logger",
         "//internal/platform:base",
         "//internal/platform:error_code_recorder",
+        "//internal/platform:logging",
+        "//internal/platform:test_util",
         "//internal/platform:types",
         "//internal/platform/implementation/g3",  # build_cleaner: keep
         "//internal/proto/analytics:connections_log_cc_proto",
+        "//internal/test",
         "//net/proto2/contrib/parse_proto:parse_text_proto",
         "//proto:connections_enums_cc_proto",
         "@com_github_protobuf_matchers//protobuf-matchers",

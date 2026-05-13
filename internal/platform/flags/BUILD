@@ -1,3 +1,5 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
 # Copyright 2023 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,9 +21,9 @@ cc_library(
         "nearby_platform_feature_flags.h",
     ],
     visibility = [
+        "//connections:__subpackages__",
         "//internal:__subpackages__",
         "//location/nearby/cpp:__subpackages__",
-        "//location/nearby/sharing:__subpackages__",
         "//location/nearby/testing:__subpackages__",
     ],
     deps = [

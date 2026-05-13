@@ -44,8 +44,8 @@
 #include "internal/platform/feature_flags.h"
 #include "internal/platform/implementation/platform.h"
 #include "internal/platform/implementation/windows/generated/winrt/Windows.Foundation.h"
-#include "internal/platform/implementation/windows/utils.h"
 #include "internal/platform/logging.h"
+#include "internal/platform/mac_address.h"
 
 typedef std::basic_string<TCHAR> tstring;
 
@@ -57,8 +57,7 @@ typedef std::basic_string<TCHAR> tstring;
 
 #define BLUETOOTH_RADIO_REGISTRY_NAME_KEY "Local Name"
 
-namespace nearby {
-namespace windows {
+namespace nearby::windows {
 namespace {
 struct LocalSettings {
   std::string original_radio_name;
@@ -108,8 +107,8 @@ BluetoothAdapter::BluetoothAdapter() : windows_bluetooth_adapter_(nullptr) {
 // Synchronously sets the status of the BluetoothAdapter to 'status', and
 // returns true if the operation was a success.
 bool BluetoothAdapter::SetStatus(Status status) {
-  LOG(ERROR) << __func__ << ": Set Bluetooth radio status to "
-             << (status == Status::kEnabled ? "On" : "Off");
+  LOG(INFO) << __func__ << ": Set Bluetooth radio status to "
+            << (status == Status::kEnabled ? "On" : "Off");
   if (windows_bluetooth_radio_ == nullptr) {
     LOG(ERROR) << __func__ << ": No Bluetooth radio on this device.";
     return false;
@@ -120,23 +119,23 @@ bool BluetoothAdapter::SetStatus(Status status) {
   if (status == Status::kDisabled &&
       (radio_state == RadioState::Unknown || radio_state == RadioState::Off ||
        radio_state == RadioState::Disabled)) {
-    LOG(INFO) << __func__
-              << ": Skip set radio status kDisabled due to requested state is "
-                 "already kDisabled.";
+    VLOG(1) << __func__
+            << ": Skip set radio status kDisabled due to requested state is "
+               "already kDisabled.";
     return true;
   }
 
   if (status == Status::kEnabled && radio_state == RadioState::On) {
-    LOG(INFO) << __func__
-              << ": Skip set radio status kEnabled due to requested state is "
-                 "already kEnabled.";
+    VLOG(1) << __func__
+            << ": Skip set radio status kEnabled due to requested state is "
+               "already kEnabled.";
     return true;
   }
 
   if (!FeatureFlags::GetInstance().GetFlags().enable_set_radio_state) {
-    LOG(INFO) << __func__
-              << ": Attempt to set the radio state while "
-                 "FeatureFlags::enable_set_radio_state is false.";
+    VLOG(1) << __func__
+            << ": Attempt to set the radio state while "
+               "FeatureFlags::enable_set_radio_state is false.";
     return false;
   }
 
@@ -314,7 +313,7 @@ void BluetoothAdapter::RestoreRadioNameIfNecessary() {
         nearby::api::ImplementationPlatform::GetAppDataPath(settings_path);
 
     auto settings_file =
-        nearby::api::ImplementationPlatform::CreateInputFile(full_path, 0);
+        nearby::api::ImplementationPlatform::CreateInputFile(full_path);
     if (settings_file == nullptr) {
       LOG(ERROR) << __func__ << ": Failed to create input file.";
       return;
@@ -389,9 +388,7 @@ void BluetoothAdapter::StoreRadioNames(absl::string_view original_radio_name,
     VLOG(1) << __func__
             << ": saved settings: " << encoded_local_settings.dump();
 
-    ByteArray data(encoded_local_settings.dump());
-
-    settings_file->Write(data);
+    settings_file->Write(encoded_local_settings.dump());
     settings_file->Close();
   } catch (const winrt::hresult_error &ex) {
     LOG(ERROR) << __func__ << ": exception:" << ex.code() << ": "
@@ -497,9 +494,9 @@ bool BluetoothAdapter::SetName(absl::string_view name, bool persist) {
   device_name_ = std::nullopt;
 
   if (registry_bluetooth_adapter_name_ == name) {
-    LOG(INFO) << __func__
-              << ": Tried to set name for bluetooth adapter to the "
-                 "same name again.";
+    VLOG(1) << __func__
+            << ": Tried to set name for bluetooth adapter to the "
+               "same name again.";
     return true;
   }
 
@@ -547,7 +544,7 @@ bool BluetoothAdapter::SetName(absl::string_view name, bool persist) {
                           // lpWideCharStr.
       nullptr,  // Pointer to a buffer that receives the converted string.
       0,        // Size, in bytes, of the buffer indicated by lpMultiByteStr.
-      NULL,     // Pointer to the character to use if a character cannot be
+      nullptr,  // Pointer to the character to use if a character cannot be
                 // represented in the specified code page.
       &defaultCharUsed);  // Pointer to a flag that indicates if the function
                           // has used a default character in the conversion.
@@ -572,8 +569,8 @@ bool BluetoothAdapter::SetName(absl::string_view name, bool persist) {
           .data(),    // Pointer to a buffer that receives the converted string.
       guid_str_size,  // Size, in bytes, of the buffer indicated by
                       // lpMultiByteStr.
-      NULL,  // // Pointer to the character to use if a character cannot be
-             // represented in the specified code page.
+      nullptr,  // Pointer to the character to use if a character cannot be
+                // represented in the specified code page.
       &defaultCharUsed);  // // Pointer to a flag that indicates if the
                           // function has used a default character in the
                           // conversion.
@@ -615,11 +612,11 @@ bool BluetoothAdapter::SetName(absl::string_view name, bool persist) {
                           // opened.
       GENERIC_WRITE,      // The requested access to the file or device.
       0,                  // The requested sharing mode of the file or device.
-      NULL,               // A pointer to a SECURITY_ATTRIBUTES structure.
+      nullptr,            // A pointer to a SECURITY_ATTRIBUTES structure.
       OPEN_EXISTING,  // An action to take on a file or device that exists or
                       // does not exist.
       0,              // The file or device attributes and flags.
-      NULL);          // A valid handle to a template file with the GENERIC_READ
+      nullptr);       // A valid handle to a template file with the GENERIC_READ
                       // access right. This parameter can be NULL.
 
   if (hDevice == INVALID_HANDLE_VALUE) {
@@ -658,7 +655,7 @@ bool BluetoothAdapter::SetName(absl::string_view name, bool persist) {
     return false;
   }
 
-  if (name != "") {
+  if (!name.empty()) {
     // Sets the data and type of a specified value under a registry key.
     // https://docs.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regsetvalueexa
     status = RegSetValueExA(
@@ -705,12 +702,12 @@ bool BluetoothAdapter::SetName(absl::string_view name, bool persist) {
           &reload,  // A pointer to the input buffer that contains the data
                     // required to perform the operation.
           sizeof(reload),  // The size of the input buffer, in bytes.
-          NULL,    // A pointer to the output buffer that is to receive the data
-                   // returned by the operation.
-          0,       // The size of the output buffer, in bytes.
-          &bytes,  // A pointer to a variable that receives the size of the
-                   // data stored in the output buffer, in bytes.
-          NULL)) {  // A pointer to an OVERLAPPED structure.
+          nullptr,  // A pointer to the output buffer that is to receive the
+                    // data returned by the operation.
+          0,        // The size of the output buffer, in bytes.
+          &bytes,   // A pointer to a variable that receives the size of the
+                    // data stored in the output buffer, in bytes.
+          nullptr)) {  // A pointer to an OVERLAPPED structure.
     LOG(ERROR) << __func__
                << ": Failed to update radio module local name. Error code: "
                << GetLastError();
@@ -779,7 +776,8 @@ BluetoothAdapter::GetGenericBluetoothAdapterInstanceID() const {
   // computer.
   // https://docs.microsoft.com/en-us/windows/win32/api/setupapi/nf-setupapi-setupdigetclassdevsa
   hDevInfo =
-      SetupDiGetClassDevsA(&GUID_DEVCLASS_BLUETOOTH, NULL, NULL, DIGCF_PRESENT);
+      SetupDiGetClassDevsA(&GUID_DEVCLASS_BLUETOOTH, /*Enumerator=*/nullptr,
+                           /*hwndParent=*/nullptr, DIGCF_PRESENT);
 
   if (hDevInfo == INVALID_HANDLE_VALUE) {
     LOG(ERROR) << __func__
@@ -821,25 +819,24 @@ BluetoothAdapter::GetGenericBluetoothAdapterInstanceID() const {
 }
 
 // Returns BT MAC address assigned to this adapter.
-std::string BluetoothAdapter::GetMacAddress() const {
+MacAddress BluetoothAdapter::GetMacAddress() const {
   if (windows_bluetooth_adapter_ == nullptr) {
     LOG(ERROR) << __func__ << ": No Bluetooth adapter on this device.";
-    return "";
+    return MacAddress();
   }
+  MacAddress mac_address;
   try {
-    return uint64_to_mac_address_string(
-        windows_bluetooth_adapter_.BluetoothAddress());
+    MacAddress::FromUint64(
+            windows_bluetooth_adapter_.BluetoothAddress(), mac_address);
   } catch (std::exception exception) {
     LOG(ERROR) << __func__ << ": exception:" << exception.what();
-    return "";
   } catch (const winrt::hresult_error &ex) {
     LOG(ERROR) << __func__ << ": exception:" << ex.code() << ": "
                << winrt::to_string(ex.message());
-    return "";
   } catch (...) {
     LOG(ERROR) << __func__ << ": unknown error.";
-    return "";
   }
+  return mac_address;
 }
 
 std::string BluetoothAdapter::GetNameFromRegistry(PHKEY hKey) const {
@@ -864,7 +861,8 @@ std::string BluetoothAdapter::GetNameFromRegistry(PHKEY hKey) const {
                           // parameter, in bytes.
   if (status != ERROR_SUCCESS) {
     LOG(ERROR) << __func__
-               << ": Failed to get the required size of the local name buffer";
+               << ": Failed to get the required size of the local name buffer: "
+               << status;
     return "";
   }
   unsigned char *local_name = new unsigned char[local_name_size];
@@ -906,5 +904,4 @@ std::string BluetoothAdapter::GetNameFromComputerName() const {
   return "";
 }
 
-}  // namespace windows
-}  // namespace nearby
+}  // namespace nearby::windows

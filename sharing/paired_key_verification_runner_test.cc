@@ -28,6 +28,7 @@
 #include "gmock/gmock.h"
 #include "protobuf-matchers/protocol-buffer-matchers.h"
 #include "gtest/gtest.h"
+#include "absl/functional/any_invocable.h"
 #include "absl/time/time.h"
 #include "internal/platform/task_runner.h"
 #include "internal/test/fake_clock.h"
@@ -143,12 +144,15 @@ class MockIncomingFramesReader : public IncomingFramesReader {
       : IncomingFramesReader(service_thread, connection) {}
 
   MOCK_METHOD(void, ReadFrame,
-              (std::function<void(std::optional<V1Frame>)> callback),
+              (absl::AnyInvocable<void(bool is_timeout, std::optional<V1Frame>)>
+                   callback,
+               absl::Duration timeout),
               (override));
 
   MOCK_METHOD(void, ReadFrame,
               (service::proto::V1Frame_FrameType frame_type,
-               std::function<void(std::optional<V1Frame>)> callback,
+               absl::AnyInvocable<void(bool is_timeout, std::optional<V1Frame>)>
+                   callback,
                absl::Duration timeout),
               (override));
 };
@@ -201,9 +205,7 @@ class PairedKeyVerificationRunnerTest : public testing::Test {
         });
   }
 
-  void SetUp() override {
-    GetFakeClock()->FastForward(absl::Minutes(15));
-  }
+  void SetUp() override { GetFakeClock()->FastForward(absl::Minutes(15)); }
 
   void RunVerification(
       bool is_incoming, bool use_valid_public_certificate,
@@ -218,7 +220,8 @@ class PairedKeyVerificationRunnerTest : public testing::Test {
 
     auto runner = std::make_shared<PairedKeyVerificationRunner>(
         &fake_clock_, OSType::WINDOWS, is_incoming, visibility_history,
-        GetAuthToken(), [this](const Frame& frame) {
+        GetAuthToken(),
+        [this](const Frame& frame) {
           frames_data_.push(std::make_unique<Frame>(frame));
         },
         std::move(public_certificate), &certificate_manager_, &frames_reader_,
@@ -237,10 +240,12 @@ class PairedKeyVerificationRunnerTest : public testing::Test {
     EXPECT_CALL(frames_reader_,
                 ReadFrame(testing::Eq(V1Frame::PAIRED_KEY_ENCRYPTION),
                           testing::_, testing::Eq(kTimeout)))
-        .WillOnce(testing::WithArg<1>(testing::Invoke(
-            [frame_type](std::function<void(std::optional<V1Frame>)> callback) {
+        .WillOnce(testing::WithArg<1>(
+            [frame_type](absl::AnyInvocable<void(bool is_timeout,
+                                                 std::optional<V1Frame>)>
+                             callback) {
               if (frame_type == ReturnFrameType::kNull) {
-                std::move(callback)(std::nullopt);
+                std::move(callback)(/*is_timeout=*/false, std::nullopt);
                 return;
               }
 
@@ -286,8 +291,8 @@ class PairedKeyVerificationRunnerTest : public testing::Test {
                 encryption_frame->clear_secret_id_hash();
               }
 
-              std::move(callback)(std::move(frame));
-            })));
+              std::move(callback)(/*is_timeout=*/false, std::move(frame));
+            }));
   }
 
   void SetUpPairedKeyResultFrame(
@@ -297,10 +302,12 @@ class PairedKeyVerificationRunnerTest : public testing::Test {
     EXPECT_CALL(frames_reader_,
                 ReadFrame(testing::Eq(V1Frame::PAIRED_KEY_RESULT), testing::_,
                           testing::Eq(kTimeout)))
-        .WillOnce(testing::WithArg<1>(testing::Invoke(
-            [=](std::function<void(std::optional<V1Frame>)> callback) {
+        .WillOnce(testing::WithArg<1>(
+            [=](absl::AnyInvocable<void(bool is_timeout,
+                                        std::optional<V1Frame>)>
+                    callback) {
               if (frame_type == ReturnFrameType::kNull) {
-                std::move(callback)(std::nullopt);
+                std::move(callback)(/*is_timeout=*/false, std::nullopt);
                 return;
               }
 
@@ -312,8 +319,8 @@ class PairedKeyVerificationRunnerTest : public testing::Test {
               result_frame->set_status(status);
               result_frame->set_os_type(os_type);
 
-              std::move(callback)(std::move(frame));
-            })));
+              std::move(callback)(/*is_timeout=*/false, std::move(frame));
+            }));
   }
   std::unique_ptr<Frame> GetWrittenFrame() {
     std::unique_ptr<Frame> frame = std::move(frames_data_.front());
@@ -338,7 +345,7 @@ class PairedKeyVerificationRunnerTest : public testing::Test {
 
  private:
   FakeClock fake_clock_;
-  FakeTaskRunner fake_task_runner_ {&fake_clock_, 1};
+  FakeTaskRunner fake_task_runner_{&fake_clock_, 1};
   FakeDeviceInfo fake_device_info_;
   FakeNearbyConnectionsManager fake_connections_manager_;
   NearbyConnectionImpl connection_;

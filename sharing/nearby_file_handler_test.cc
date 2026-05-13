@@ -15,104 +15,98 @@
 #include "sharing/nearby_file_handler.h"
 
 #include <atomic>
-#include <cstdio>
-#include <filesystem>  // NOLINT(build/c++17)
+#include <fstream>
+#include <ios>
+#include <memory>
+#include <utility>
 #include <vector>
 
 #include "gtest/gtest.h"
-#include "absl/synchronization/notification.h"
-#include "absl/time/clock.h"
 #include "absl/time/time.h"
+#include "internal/base/file_path.h"
 #include "internal/base/files.h"
+#include "internal/test/fake_clock.h"
+#include "internal/test/fake_task_runner.h"
 #include "sharing/internal/api/mock_sharing_platform.h"
 
 namespace nearby {
 namespace sharing {
 namespace {
+using ::absl::Seconds;
 using ::nearby::sharing::api::MockSharingPlatform;
 
-bool CreateFile(std::filesystem::path file_path) {
-  std::FILE* file = std::fopen(file_path.string().c_str(), "w+");
-  if (file == nullptr) {
+bool CreateFile(FilePath& file_path) {
+  std::ofstream file(file_path.GetPath(),
+                     std::ios_base::out | std::ios_base::trunc);
+  if (!file.good()) {
     return false;
   }
-  std::fclose(file);
+  file.close();
   return true;
-}
-
-TEST(NearbyFileHandler, OpenFiles) {
-  MockSharingPlatform mock_platform;
-  NearbyFileHandler nearby_file_handler(mock_platform);
-  absl::Notification notification;
-  std::vector<NearbyFileHandler::FileInfo> result;
-  std::filesystem::path test_file =
-      std::filesystem::temp_directory_path() / "nearby_nfh_test_abc.jpg";
-
-  ASSERT_TRUE(CreateFile(test_file));
-  nearby_file_handler.OpenFiles(
-      {test_file}, [&result, &notification](
-                       std::vector<NearbyFileHandler::FileInfo> file_infos) {
-        result = file_infos;
-        notification.Notify();
-      });
-
-  notification.WaitForNotificationWithTimeout(absl::Seconds(1));
-  EXPECT_EQ(result.size(), 1);
-  ASSERT_TRUE(RemoveFile(test_file));
 }
 
 TEST(NearbyFileHandler, DeleteAFileFromDisk) {
   MockSharingPlatform mock_platform;
-  NearbyFileHandler nearby_file_handler(mock_platform);
-  std::filesystem::path test_file =
-      std::filesystem::temp_directory_path() / "nearby_nfh_test_abc.jpg";
+  FakeClock clock;
+  auto task_runner = std::make_unique<FakeTaskRunner>(&clock, 1);
+  FakeTaskRunner* task_runner_ptr = task_runner.get();
+  NearbyFileHandler nearby_file_handler(mock_platform, std::move(task_runner));
+  FilePath test_file = Files::GetTemporaryDirectory().append(
+      FilePath("nearby_nfh_test_abc.jpg"));
   ASSERT_TRUE(CreateFile(test_file));
-  std::vector<std::filesystem::path> file_paths;
+  std::vector<FilePath> file_paths;
   file_paths.push_back(test_file);
   nearby_file_handler.DeleteFilesFromDisk(file_paths, []() {});
-  ASSERT_TRUE(FileExists(test_file));
-  absl::SleepFor(absl::Seconds(2));
-  ASSERT_FALSE(FileExists(test_file));
+  ASSERT_TRUE(Files::FileExists(test_file));
+  EXPECT_TRUE(task_runner_ptr->SyncWithTimeout(Seconds(5)));
+  ASSERT_FALSE(Files::FileExists(test_file));
 }
 
 TEST(NearbyFileHandler, DeleteMultipleFilesFromDisk) {
   MockSharingPlatform mock_platform;
-  NearbyFileHandler nearby_file_handler(mock_platform);
-  std::filesystem::path test_file =
-      std::filesystem::temp_directory_path() / "nearby_nfh_test_abc.jpg";
-  std::filesystem::path test_file2 =
-      std::filesystem::temp_directory_path() / "nearby_nfh_test_def.jpg";
-  std::filesystem::path test_file3 =
-      std::filesystem::temp_directory_path() / "nearby_nfh_test_ghi.jpg";
-  std::vector<std::filesystem::path> file_paths;
+  FakeClock clock;
+  auto task_runner = std::make_unique<FakeTaskRunner>(&clock, 1);
+  FakeTaskRunner* task_runner_ptr = task_runner.get();
+  NearbyFileHandler nearby_file_handler(mock_platform, std::move(task_runner));
+  FilePath test_file = Files::GetTemporaryDirectory().append(
+      FilePath("nearby_nfh_test_abc.jpg"));
+  FilePath test_file2 = Files::GetTemporaryDirectory().append(
+      FilePath("nearby_nfh_test_def.jpg"));
+  FilePath test_file3 = Files::GetTemporaryDirectory().append(
+      FilePath("nearby_nfh_test_ghi.jpg"));
+  std::vector<FilePath> file_paths;
   file_paths = {test_file, test_file2, test_file3};
   // Check it doesn't throw an exception.
   nearby_file_handler.DeleteFilesFromDisk(file_paths, []() {});
-  ASSERT_FALSE(FileExists(test_file));
-  ASSERT_FALSE(FileExists(test_file2));
-  ASSERT_FALSE(FileExists(test_file3));
-  absl::SleepFor(absl::Seconds(2));
-  ASSERT_FALSE(FileExists(test_file));
-  ASSERT_FALSE(FileExists(test_file2));
-  ASSERT_FALSE(FileExists(test_file3));
+  ASSERT_FALSE(Files::FileExists(test_file));
+  ASSERT_FALSE(Files::FileExists(test_file2));
+  ASSERT_FALSE(Files::FileExists(test_file3));
+
+  EXPECT_TRUE(task_runner_ptr->SyncWithTimeout(Seconds(5)));
+  ASSERT_FALSE(Files::FileExists(test_file));
+  ASSERT_FALSE(Files::FileExists(test_file2));
+  ASSERT_FALSE(Files::FileExists(test_file3));
 }
 
 TEST(NearbyFileHandler, TestCallback) {
   MockSharingPlatform mock_platform;
   std::atomic_bool received_callback = false;
-  NearbyFileHandler nearby_file_handler(mock_platform);
-  std::filesystem::path test_file =
-      std::filesystem::temp_directory_path() / "nearby_nfh_test_abc.jpg";
+  FakeClock clock;
+  auto task_runner = std::make_unique<FakeTaskRunner>(&clock, 1);
+  FakeTaskRunner* task_runner_ptr = task_runner.get();
+  NearbyFileHandler nearby_file_handler(mock_platform, std::move(task_runner));
+  FilePath test_file = Files::GetTemporaryDirectory().append(
+      FilePath("nearby_nfh_test_abc.jpg"));
   ASSERT_TRUE(CreateFile(test_file));
-  std::vector<std::filesystem::path> file_paths;
+  std::vector<FilePath> file_paths;
   file_paths.push_back(test_file);
   nearby_file_handler.DeleteFilesFromDisk(
       file_paths, [&received_callback]() { received_callback = true; });
   ASSERT_FALSE(received_callback);
-  ASSERT_TRUE(FileExists(test_file));
-  absl::SleepFor(absl::Seconds(2));
+  ASSERT_TRUE(Files::FileExists(test_file));
+  EXPECT_TRUE(task_runner_ptr->SyncWithTimeout(Seconds(5)));
   ASSERT_TRUE(received_callback);
-  ASSERT_FALSE(FileExists(test_file));
+  ASSERT_FALSE(Files::FileExists(test_file));
 }
 
 }  // namespace

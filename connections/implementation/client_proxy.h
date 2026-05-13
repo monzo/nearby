@@ -22,9 +22,12 @@
 #include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
+#include "absl/types/span.h"
 #include "connections/advertising_options.h"
 #include "connections/connection_options.h"
 #include "connections/discovery_options.h"
@@ -45,18 +48,15 @@
 #include "internal/platform/cancelable_alarm.h"
 #include "internal/platform/cancellation_flag.h"
 #include "internal/platform/error_code_recorder.h"
+#include "internal/platform/implementation/app_lifecycle_monitor.h"
+#include "internal/platform/implementation/preferences_manager.h"
+#include "internal/platform/mac_address.h"
 #include "internal/platform/mutex.h"
-// Prefer using absl:: versions of a set and a map; they tend to be more
-// efficient: implementation is using open-addressing hash tables.
-#include "absl/container/flat_hash_map.h"
-#include "absl/container/flat_hash_set.h"
-#include "absl/types/span.h"
 #include "internal/platform/os_name.h"
 #include "internal/platform/scheduled_executor.h"
 #include "internal/proto/analytics/connections_log.pb.h"
 
-namespace nearby {
-namespace connections {
+namespace nearby::connections {
 
 // ClientProxy is tracking state of client's connection, and serves as
 // a proxy for notifications sent to this client.
@@ -77,15 +77,22 @@ class ClientProxy final {
   std::string GetLocalEndpointId();
   std::string GetLocalEndpointInfo() { return local_endpoint_info_; }
 
+  // Override the base for received file attachments from a specific endpoint.
+  // Returns true if the endpoint is found and the path is overridden.
+  bool OverrideSavePath(absl::string_view endpoint_id, absl::string_view path);
+  // Get the save path for a specific endpoint.  Returns empty string if
+  // not set.
+  std::string GetSavePath(absl::string_view endpoint_id) const;
+
   analytics::AnalyticsRecorder& GetAnalyticsRecorder() const {
     return *analytics_recorder_;
   }
 
   std::string GetConnectionToken(const std::string& endpoint_id);
-  std::optional<std::string> GetBluetoothMacAddress(
+  std::optional<MacAddress> GetBluetoothMacAddress(
       const std::string& endpoint_id);
   void SetBluetoothMacAddress(const std::string& endpoint_id,
-                              const std::string& bluetooth_mac_address);
+                              MacAddress bluetooth_mac_address);
   const NearbyDevice* GetLocalDevice();
   NearbyDeviceProvider* GetLocalDeviceProvider() {
     if (external_device_provider_ != nullptr) {
@@ -197,8 +204,6 @@ class ClientProxy final {
   std::string GetBssid(const std::string& endpoint_id) const;
   // Returns WIFI Frequency for this endpoint.
   std::int32_t GetApFrequency(const std::string& endpoint_id) const;
-  // Returns IP Address in 4 bytes format for this endpoint.
-  std::string GetIPAddress(const std::string& endpoint_id) const;
   // Returns true if it's safe to send payloads to this endpoint.
   bool IsConnectedToEndpoint(const std::string& endpoint_id) const;
   // Returns all endpoints that can safely be sent payloads.
@@ -268,15 +273,6 @@ class ClientProxy final {
   DiscoveryOptions GetDiscoveryOptions() const;
   v3::ConnectionListeningOptions GetListeningOptions() const;
 
-  // The endpoint id will be stable for 30 seconds after high visibility mode
-  // (high power and Bluetooth Classic) advertisement stops.
-  // If client re-enters high visibility mode within 30 seconds, he is going to
-  // have the same endpoint id.
-  void EnterHighVisibilityMode();
-  // Cleans up any modifications in high visibility mode. The endpoint id always
-  // rotates.
-  void ExitHighVisibilityMode();
-
   // Enters stable endpoint ID mode.
   void EnterStableEndpointIdMode();
   // Cleans up any modifications in stable endpoint ID mode. The endpoint id
@@ -285,9 +281,11 @@ class ClientProxy final {
 
   std::string Dump();
 
-  const location::nearby::connections::OsInfo& GetLocalOsInfo() const;
+  virtual const location::nearby::connections::OsInfo& GetLocalOsInfo() const;
   std::optional<location::nearby::connections::OsInfo> GetRemoteOsInfo(
       absl::string_view endpoint_id) const;
+  void SetLocalOsType(
+      const location::nearby::connections::OsInfo::OsType& os_type);
   void SetRemoteOsInfo(
       absl::string_view endpoint_id,
       const location::nearby::connections::OsInfo& remote_os_info);
@@ -305,18 +303,12 @@ class ClientProxy final {
     return supports_safe_to_disconnect_;
   }
 
-  bool IsSupportAutoReconnect() const { return support_auto_reconnect_; }
-
-  const std::int32_t& GetLocalSafeToDisconnectVersion() const {
-    return local_safe_to_disconnect_version_;
-  }
   std::optional<std::int32_t> GetRemoteSafeToDisconnectVersion(
       absl::string_view endpoint_id) const;
   void SetRemoteSafeToDisconnectVersion(
       absl::string_view endpoint_id,
       const std::int32_t& safe_to_disconnect_version);
   bool IsSafeToDisconnectEnabled(absl::string_view endpoint_id);
-  bool IsAutoReconnectEnabled(absl::string_view endpoint_id);
   bool IsPayloadReceivedAckEnabled(absl::string_view endpoint_id);
 
   // Returns the multiplex socket supports status for local device.
@@ -339,6 +331,20 @@ class ClientProxy final {
   // Sets the WebRTC non cellular network status.
   void SetWebRtcNonCellular(bool webrtc_non_cellular);
 
+  // Returns true if DCT advertising/scanning is enabled.
+  bool IsDctEnabled() const;
+
+  // Gets the DCT dedup value. This is used to dedup the same device name when
+  // scanning for multiple devices.
+  // It is 7 bits derived from the local endpoint ID.
+  uint8_t GetDctDedup() const;
+
+  // Updates the DCT device name before advertising.
+  void UpdateDctDeviceName(absl::string_view device_name);
+
+  std::optional<location::nearby::connections::MediumRole> GetMediumRole(
+      absl::string_view endpoint_id) const;
+
   /** Bitmask for bt multiplex connection support. */
   // Note. Deprecates the first and second bit of BT_MULTIPLEX_ENABLED and
   // WIFI_LAN_MULTIPLEX_ENABLED and shift them to the third and the forth bit.
@@ -350,6 +356,12 @@ class ClientProxy final {
     kBtMultiplexEnabled = 1 << 2,
     kWifiLanMultiplexEnabled = 1 << 3,
   };
+
+  // Forces client to regenerate a new local endpoint id.
+  void ClearCachedLocalEndpointId();
+
+  // Saves the client information to preferences.
+  void SaveClientInfoToPreferences();
 
  private:
   struct Connection {
@@ -383,6 +395,7 @@ class ClientProxy final {
     std::optional<location::nearby::connections::OsInfo> os_info;
     std::int32_t safe_to_disconnect_version;
     std::int32_t remote_multiplex_socket_bitmask;
+    std::string save_path;
   };
   using ConnectionPair = std::pair<Connection, PayloadListener>;
 
@@ -436,15 +449,22 @@ class ClientProxy final {
 
   std::string ToString(PayloadProgressInfo::Status status) const;
 
+  std::optional<std::string> GetEndpointIdForDct() const;
+
+  void InitializePreferencesManager();
+  void LoadClientInfoFromPreferences();
+
+  // The device name used for DCT advertising.
+  std::string dct_device_name_;
+  // The dedup value used for DCT advertising.
+  uint8_t dct_dedup_ = 0;
+  // The endpoint ID used for DCT advertising.
+  std::string dct_endpoint_id_;
+
   mutable RecursiveMutex mutex_;
   std::int64_t client_id_;
   std::string local_endpoint_id_;
   std::string local_endpoint_info_;
-  // If currently is advertising in high visibility mode is true: high power and
-  // Bluetooth Classic enabled. When high_visibility_mode_ is true, the endpoint
-  // id is stable for 30s. When high_visibility_mode_ is false, the endpoint id
-  // always rotates.
-  bool high_vis_mode_ = false;
 
   // If advertising is in stable endpoint ID mode, the endpoint ID is stable
   // for 30s after advertising or disconnection. When stable_endpoint_id_mode_
@@ -487,7 +507,7 @@ class ClientProxy final {
   absl::flat_hash_map<std::string, ConnectionPair> connections_;
 
   // Maps endpoint_id to Bluetooth Mac Addresses.
-  absl::flat_hash_map<std::string, std::string> bluetooth_mac_addresses_;
+  absl::flat_hash_map<std::string, MacAddress> bluetooth_mac_addresses_;
 
   // A cache of endpoint ids that we've already notified the discoverer of. We
   // check this cache before calling onEndpointFound() so that we don't notify
@@ -505,6 +525,12 @@ class ClientProxy final {
   std::unique_ptr<CancellationFlag> default_cancellation_flag_ =
       std::make_unique<CancellationFlag>(true);
 
+  // An app lifecycle monitor for monitoring the app lifecycle state.
+  std::unique_ptr<api::AppLifecycleMonitor> app_lifecycle_monitor_;
+
+  // A preferences manager for storing client-specific preferences.
+  std::unique_ptr<nearby::api::PreferencesManager> preferences_manager_;
+
   // An analytics logger with |EventLogger| provided by client, which is default
   // nullptr as no-op.
   std::unique_ptr<analytics::AnalyticsRecorder> analytics_recorder_;
@@ -517,13 +543,12 @@ class ClientProxy final {
   // For Nearby Connections' own device provider.
   std::unique_ptr<v3::ConnectionsDeviceProvider> connections_device_provider_;
   bool supports_safe_to_disconnect_;
-  bool support_auto_reconnect_;
-  std::int32_t local_safe_to_disconnect_version_;
   // Allowed to use WebRTC over non-cellular networks.
   bool webrtc_non_cellular_ = false;
+  // Whether DCT is enabled.
+  bool is_dct_enabled_ = false;
 };
 
-}  // namespace connections
-}  // namespace nearby
+}  // namespace nearby::connections
 
 #endif  // CORE_INTERNAL_CLIENT_PROXY_H_

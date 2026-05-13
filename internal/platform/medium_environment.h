@@ -17,6 +17,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -26,13 +27,13 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
-#include "absl/types/optional.h"
 #include "internal/base/observer_list.h"
 #include "internal/platform/borrowable.h"
+#include "internal/platform/implementation/awdl.h"
 #include "internal/platform/implementation/ble.h"
-#include "internal/platform/implementation/ble_v2.h"
 #include "internal/platform/implementation/bluetooth_adapter.h"
 #include "internal/platform/implementation/bluetooth_classic.h"
+#include "internal/platform/mac_address.h"
 #include "internal/platform/runnable.h"
 #include "internal/platform/uuid.h"
 #include "internal/test/fake_clock.h"
@@ -63,6 +64,10 @@ struct EnvironmentConfig {
   // The simulated clock is automatically picked up by SystemClock, Timer and
   // ScheduledExecutor implementations.
   bool use_simulated_clock = false;
+
+  // If true, the app data path will be a temporary directory, instead of the
+  // actual app data path, so that we can test the preferences manager under G3.
+  bool use_temporary_directory_for_app_path = false;
 };
 
 // MediumEnvironment is a simulated environment which allows multiple instances
@@ -74,11 +79,7 @@ class MediumEnvironment {
  public:
   using BluetoothDiscoveryCallback =
       api::BluetoothClassicMedium::DiscoveryCallback;
-  using BleDiscoveredPeripheralCallback =
-      api::BleMedium::DiscoveredPeripheralCallback;
-  using BleAcceptedConnectionCallback =
-      api::BleMedium::AcceptedConnectionCallback;
-  using BleScanCallback = api::ble_v2::BleMedium::ScanningCallback;
+  using BleScanCallback = api::ble::BleMedium::ScanningCallback;
 #ifndef NO_WEBRTC
   using OnSignalingMessageCallback =
       api::WebRtcSignalingMessenger::OnSignalingMessageCallback;
@@ -87,8 +88,10 @@ class MediumEnvironment {
 #endif
   using WifiLanDiscoveredServiceCallback =
       api::WifiLanMedium::DiscoveredServiceCallback;
+  using AwdlDiscoveredServiceCallback =
+      api::AwdlMedium::DiscoveredServiceCallback;
 
-  struct BleV2MediumStatus {
+  struct BleMediumStatus {
     bool is_advertising;
     bool is_scanning;
   };
@@ -158,12 +161,9 @@ class MediumEnvironment {
   void UnregisterBluetoothMedium(api::BluetoothClassicMedium& medium);
 
   // Returns a Bluetooth Device object matching given mac address to nullptr.
-  api::BluetoothDevice* FindBluetoothDevice(const std::string& mac_address);
+  api::BluetoothDevice* FindBluetoothDevice(MacAddress mac_address);
 
-  api::ble_v2::BlePeripheral* FindBleV2Peripheral(
-      absl::string_view mac_address);
-
-  const EnvironmentConfig& GetEnvironmentConfig();
+  EnvironmentConfig GetEnvironmentConfig();
 #ifndef NO_WEBRTC
   // Registers |message_callback| to receive messages sent to device with id
   // |self_id|, and |complete_callback| to notify when signaling is complete.
@@ -196,57 +196,17 @@ class MediumEnvironment {
   // Adds medium-related info to allow for scanning/advertising to work.
   // This provides access to this medium from other mediums, when protocol
   // expects they should communicate.
-  void RegisterBleMedium(api::BleMedium& medium);
-
-  // Updates advertising info to indicate the current medium is exposing
-  // advertising event.
-  void UpdateBleMediumForAdvertising(api::BleMedium& medium,
-                                     api::BlePeripheral& peripheral,
-                                     const std::string& service_id,
-                                     bool fast_advertisement, bool enabled);
-
-  // Updates discovery callback info to allow for dispatch of discovery events.
-  //
-  // Invokes callback asynchronously when any changes happen to discoverable
-  // devices if it is turned on.
-  //
-  // This should be called when discoverable state changes.
-  // A valid callback should be assigned when discovery `enabled` as true; or
-  // an empty callback is assigned with discovery `enabled` as false.
-  void UpdateBleMediumForScanning(
-      api::BleMedium& medium, const std::string& service_id,
-      const std::string& fast_advertisement_service_uuid,
-      BleDiscoveredPeripheralCallback callback, bool enabled);
-
-  // Updates Accepted connection callback info to allow for dispatch of
-  // advertising events.
-  void UpdateBleMediumForAcceptedConnection(
-      api::BleMedium& medium, const std::string& service_id,
-      BleAcceptedConnectionCallback callback);
-
-  // Removes medium-related info. This should correspond to device power off.
-  void UnregisterBleMedium(api::BleMedium& medium);
-
-  // Call back when advertising has created the server socket and is ready for
-  // connect.
-  void CallBleAcceptedConnectionCallback(api::BleMedium& medium,
-                                         api::BleSocket& socket,
-                                         const std::string& service_id);
-
-  // Adds medium-related info to allow for scanning/advertising to work.
-  // This provides access to this medium from other mediums, when protocol
-  // expects they should communicate.
   // The registered `medium` must refer to a valid instance that outlives this
   // object.
-  void RegisterBleV2Medium(api::ble_v2::BleMedium& medium,
-                           api::ble_v2::BlePeripheral* peripheral);
+  void RegisterBleMedium(api::ble::BleMedium& medium,
+                         api::ble::BlePeripheral::UniqueId peripheral_id);
 
   // Updates advertising info to indicate the current medium is exposing
   // advertising event.
-  void UpdateBleV2MediumForAdvertising(
-      bool enabled, api::ble_v2::BleMedium& medium,
-      api::ble_v2::BlePeripheral& peripheral,
-      const api::ble_v2::BleAdvertisementData& advertisement_data);
+  void UpdateBleMediumForAdvertising(
+      bool enabled, api::ble::BleMedium& medium,
+      api::ble::BlePeripheral::UniqueId peripheral_id,
+      const api::ble::BleAdvertisementData& advertisement_data);
 
   // Updates discovery callback info to allow for dispatch of discovery events.
   //
@@ -256,30 +216,41 @@ class MediumEnvironment {
   // This should be called when discoverable state changes.
   // The `callback` argument should be non-empty if `enabled` is true or empty
   // if `enabled` is false.
-  void UpdateBleV2MediumForScanning(bool enabled,
-                                    const Uuid& scanning_service_uuid,
-                                    std::uint32_t internal_session_id,
-                                    BleScanCallback callback,
-                                    api::ble_v2::BleMedium& medium);
+  void UpdateBleMediumForScanning(bool enabled,
+                                  const Uuid& scanning_service_uuid,
+                                  std::uint32_t internal_session_id,
+                                  BleScanCallback callback,
+                                  api::ble::BleMedium& medium);
 
   // Removes medium-related info. This should correspond to device power off.
-  void UnregisterBleV2Medium(api::ble_v2::BleMedium& mediumum);
+  void UnregisterBleMedium(api::ble::BleMedium& mediumum);
 
   // Collects the status for the given BleMedium. Mainly used in unit tests
   // to verify if the BleMedum is in expected status after operations.
-  std::optional<BleV2MediumStatus> GetBleV2MediumStatus(
-      const api::ble_v2::BleMedium& medium);
+  std::optional<BleMediumStatus> GetBleMediumStatus(
+      const api::ble::BleMedium& medium);
 
   // Adds medium-related info to allow for discovery/advertising to work.
   // This provides access to this medium from other mediums, when protocol
   // expects they should communicate.
   void RegisterWifiLanMedium(api::WifiLanMedium& medium);
 
+  // Adds medium-related info to allow for discovery/advertising to work.
+  // This provides access to this medium from other mediums, when protocol
+  // expects they should communicate.
+  void RegisterAwdlMedium(api::AwdlMedium& medium);
+
   // Updates advertising info to indicate the current medium is exposing
   // advertising event.
   void UpdateWifiLanMediumForAdvertising(api::WifiLanMedium& medium,
                                          const NsdServiceInfo& nsd_service_info,
+                                         const std::string& ip_address,
                                          bool enabled);
+  // Updates advertising info to indicate the current medium is exposing
+  // advertising event.
+  void UpdateAwdlMediumForAdvertising(api::AwdlMedium& medium,
+                                      const NsdServiceInfo& nsd_service_info,
+                                      bool enabled);
 
   // Updates discovery callback info to allow for dispatch of discovery events.
   //
@@ -290,6 +261,16 @@ class MediumEnvironment {
       api::WifiLanMedium& medium, WifiLanDiscoveredServiceCallback callback,
       const std::string& service_type, bool enabled);
 
+  // Updates discovery callback info to allow for dispatch of discovery events.
+  //
+  // This should be called when discoverable state changes.
+  // A valid callback should be assigned when discovery `enabled` as true; or
+  // an empty callback is assigned with discovery `enabled` as false.
+  void UpdateAwdlMediumForDiscovery(api::AwdlMedium& medium,
+                                    AwdlDiscoveredServiceCallback callback,
+                                    const std::string& service_type,
+                                    bool enabled);
+
   // Gets Fake IP address for WifiLan medium.
   std::string GetFakeIPAddress() const;
 
@@ -299,16 +280,23 @@ class MediumEnvironment {
   // Removes medium-related info. This should correspond to device power off.
   void UnregisterWifiLanMedium(api::WifiLanMedium& medium);
 
+  // Removes medium-related info. This should correspond to device power off.
+  void UnregisterAwdlMedium(api::AwdlMedium& medium);
+
   // Returns WifiLan medium whose advertising service matching IP address and
   // port, or nullptr.
   api::WifiLanMedium* GetWifiLanMedium(const std::string& ip_address, int port);
+
+  // Returns Awdl medium whose advertising service matching IP address and
+  // port, or nullptr.
+  api::AwdlMedium* GetAwdlMedium(const std::string& ip_address, int port);
 
   // Adds medium-related info to allow for start/connect WifiDirect to work.
   void RegisterWifiDirectMedium(api::WifiDirectMedium& medium);
 
   // Returns WifiDirect medium that matches ssid or IP address with the role of
   // the Medium. Returns nullptr if not found.
-  api::WifiDirectMedium* GetWifiDirectMedium(absl::string_view ssid,
+  api::WifiDirectMedium* GetWifiDirectMedium(absl::string_view service_name,
                                              absl::string_view ip_address);
 
   // Updates credential and Medium role(GO or GC) to indicate the current
@@ -338,8 +326,8 @@ class MediumEnvironment {
   // Updates credential and Medium role(AP or STA) to indicate the current
   // medium is exposing Start Hotspot event.
   void UpdateWifiHotspotMediumForStartOrConnect(
-      api::WifiHotspotMedium& medium, HotspotCredentials* hotspot_credentials,
-      bool is_ap, bool enabled);
+      api::WifiHotspotMedium& medium,
+      const HotspotCredentials* hotspot_credentials, bool is_ap, bool enabled);
 
   // Removes medium-related info. This should correspond to device stopped or
   // disconnected.
@@ -347,18 +335,24 @@ class MediumEnvironment {
 
   void SetFeatureFlags(const FeatureFlags::Flags& flags);
 
-  std::optional<FakeClock*> GetSimulatedClock();
+  absl::Time Now();
+  void FastForward(absl::Duration duration);
+  void AddSimulatedClockObserver(const std::string& name,
+                                 std::function<void()> observer);
+  void RemoveSimulatedClockObserver(const std::string& name);
 
-  api::ble_v2::BleMedium* FindBleV2Medium(absl::string_view address);
-  api::ble_v2::BleMedium* FindBleV2Medium(uint64_t id);
+  api::ble::BleMedium* FindBleMedium(api::ble::BlePeripheral::UniqueId id);
 
-  void RegisterGattServer(api::ble_v2::BleMedium& medium,
-                          api::ble_v2::BlePeripheral* peripheral,
-                          Borrowable<api::ble_v2::GattServer*> gatt_server);
-  void UnregisterGattServer(api::ble_v2::BleMedium& medium);
+  api::ble::BlePeripheral FindBlePeripheral(
+      api::ble::BlePeripheral::UniqueId id);
 
-  Borrowable<api::ble_v2::GattServer*> GetGattServer(
-      api::ble_v2::BlePeripheral& peripheral);
+  void RegisterGattServer(api::ble::BleMedium& medium,
+                          api::ble::BlePeripheral::UniqueId peripheral_id,
+                          Borrowable<api::ble::GattServer*> gatt_server);
+  void UnregisterGattServer(api::ble::BleMedium& medium);
+
+  Borrowable<api::ble::GattServer*> GetGattServer(
+      api::ble::BlePeripheral::UniqueId peripheral_id);
 
   // Configures the BluetoothPairingContext for remote BluetoothDevice.
   void ConfigBluetoothPairingContext(api::BluetoothDevice* device,
@@ -406,22 +400,14 @@ class MediumEnvironment {
   };
 
   struct BleMediumContext {
-    BleDiscoveredPeripheralCallback discovery_callback;
-    BleAcceptedConnectionCallback accepted_connection_callback;
-    api::BlePeripheral* ble_peripheral = nullptr;
-    bool advertising = false;
-    bool fast_advertisement = false;
-  };
-
-  struct BleV2MediumContext {
     absl::flat_hash_map<std::pair<Uuid, std::uint32_t>, BleScanCallback>
         scan_callback_map;
     // using the same ble peripheral for different advertisement.
-    api::ble_v2::BlePeripheral* ble_peripheral;
-    api::ble_v2::BleAdvertisementData advertisement_data;
+    api::ble::BlePeripheral::UniqueId ble_peripheral_id;
+    api::ble::BleAdvertisementData advertisement_data;
     bool advertising = false;
     bool scanning = false;
-    std::unique_ptr<Borrowable<api::ble_v2::GattServer*>> gatt_server = nullptr;
+    std::unique_ptr<Borrowable<api::ble::GattServer*>> gatt_server = nullptr;
   };
 
   struct WifiLanMediumContext {
@@ -429,6 +415,16 @@ class MediumEnvironment {
     absl::flat_hash_map<std::string, NsdServiceInfo> advertising_services;
     // discovered service type vs callback map.
     absl::flat_hash_map<std::string, WifiLanDiscoveredServiceCallback>
+        discovered_callbacks;
+    // discovered service vs service type map.
+    absl::flat_hash_map<std::string, NsdServiceInfo> discovered_services;
+  };
+
+  struct AwdlMediumContext {
+    // advertising service type vs NsdServiceInfo map.
+    absl::flat_hash_map<std::string, NsdServiceInfo> advertising_services;
+    // discovered service type vs callback map.
+    absl::flat_hash_map<std::string, AwdlDiscoveredServiceCallback>
         discovered_callbacks;
     // discovered service vs service type map.
     absl::flat_hash_map<std::string, NsdServiceInfo> discovered_services;
@@ -447,7 +443,7 @@ class MediumEnvironment {
     bool is_ap = true;
     // Set "true" when SoftAP is started or STA is connected
     bool is_active = false;
-    HotspotCredentials* hotspot_credentials;
+    const HotspotCredentials* hotspot_credentials;
   };
 
   struct BluetoothPairingContext {
@@ -470,19 +466,18 @@ class MediumEnvironment {
                                      api::BluetoothAdapter::ScanMode mode,
                                      bool enabled);
 
-  void OnBlePeripheralStateChanged(BleMediumContext& info,
-                                   api::BlePeripheral& peripheral,
-                                   const std::string& service_id,
-                                   bool fast_advertisement, bool enabled);
-
-  void OnBleV2PeripheralStateChanged(
-      bool enabled, BleV2MediumContext& context, const Uuid& service_id,
-      const api::ble_v2::BleAdvertisementData& ble_advertisement_data,
-      api::ble_v2::BlePeripheral& peripheral);
+  void OnBlePeripheralStateChanged(
+      bool enabled, BleMediumContext& context, const Uuid& service_id,
+      const api::ble::BleAdvertisementData& ble_advertisement_data,
+      api::ble::BlePeripheral::UniqueId peripheral_id);
 
   void OnWifiLanServiceStateChanged(WifiLanMediumContext& info,
                                     const NsdServiceInfo& service_info,
                                     bool enabled);
+
+  void OnAwdlServiceStateChanged(AwdlMediumContext& info,
+                                 const NsdServiceInfo& service_info,
+                                 bool enabled);
 
   void RunOnMediumEnvironmentThread(Runnable runnable);
 
@@ -499,9 +494,7 @@ class MediumEnvironment {
   absl::flat_hash_map<api::BluetoothClassicMedium*, BluetoothMediumContext>
       bluetooth_mediums_;
 
-  absl::flat_hash_map<api::BleMedium*, BleMediumContext> ble_mediums_;
-  absl::flat_hash_map<api::ble_v2::BleMedium*, BleV2MediumContext>
-      ble_v2_mediums_;
+  absl::flat_hash_map<api::ble::BleMedium*, BleMediumContext> ble_mediums_;
   absl::flat_hash_map<api::BluetoothDevice*, BluetoothPairingContext>
       devices_pairing_contexts_;
 #ifndef NO_WEBRTC
@@ -517,6 +510,8 @@ class MediumEnvironment {
   absl::flat_hash_map<api::WifiLanMedium*, WifiLanMediumContext>
       wifi_lan_mediums_;
 
+  absl::flat_hash_map<api::AwdlMedium*, AwdlMediumContext> awdl_mediums_;
+
   Mutex mutex_;
   absl::flat_hash_map<api::WifiDirectMedium*, WifiDirectMediumContext>
       wifi_direct_mediums_ ABSL_GUARDED_BY(mutex_);
@@ -526,7 +521,7 @@ class MediumEnvironment {
 
   bool use_valid_peer_connection_ = true;
   absl::Duration peer_connection_latency_ = absl::ZeroDuration();
-  std::unique_ptr<FakeClock> simulated_clock_ ABSL_GUARDED_BY(mutex_);
+  std::shared_ptr<FakeClock> simulated_clock_ ABSL_GUARDED_BY(mutex_);
   ObserverList<api::BluetoothClassicMedium::Observer> observers_;
   bool ble_extended_advertisements_available_ = false;
 };

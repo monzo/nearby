@@ -13,9 +13,8 @@
 # limitations under the License.
 
 load("@com_google_protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
-load("@com_google_protobuf//bazel:java_lite_proto_library.bzl", "java_lite_proto_library")
-load("@com_google_protobuf//bazel:java_proto_library.bzl", "java_proto_library")
 load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
 
 licenses(["notice"])
 
@@ -30,22 +29,6 @@ proto_library(
         "//proto:connections_enums_proto",
         "//proto/errorcode:error_code_enums_proto",
     ],
-)
-
-proto_library(
-    name = "fast_pair_log_proto",
-    srcs = ["fast_pair_log.proto"],
-    deps = ["//proto:fast_pair_enums_proto"],
-)
-
-cc_proto_library(
-    name = "fast_pair_log_cc_proto",
-    deps = [":fast_pair_log_proto"],
-)
-
-java_proto_library(
-    name = "fast_pair_log_java_proto",
-    deps = [":fast_pair_log_proto"],
 )
 
 cc_proto_library(
@@ -67,11 +50,11 @@ cc_test(
     shard_count = 16,
     deps = [
         ":connections_log_cc_proto",
-        "//internal/platform:types",
+        "//internal/platform:logging",
         "//internal/platform/implementation/g3",  # build_cleaner: keep
         "//proto:connections_enums_cc_proto",
-        "//third_party/protobuf",
         "@com_github_protobuf_matchers//protobuf-matchers",
         "@com_google_googletest//:gtest_main",
+        "@com_google_protobuf//:protobuf",
     ],
 )

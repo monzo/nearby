@@ -19,29 +19,23 @@
 
 #include <string>
 
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 
-#import "internal/platform/implementation/apple/Mediums/BLEv2/GNCPeripheral.h"
+#import "internal/platform/implementation/apple/Mediums/BLE/GNCPeripheral.h"
 
 namespace nearby {
 namespace apple {
 
-#pragma mark - EmptyBlePeripheral
-
-EmptyBlePeripheral::EmptyBlePeripheral() : unique_id_(0) {}
-
-std::string EmptyBlePeripheral::GetAddress() const { return ""; }
-
-api::ble_v2::BlePeripheral::UniqueId EmptyBlePeripheral::GetUniqueId() const { return unique_id_; }
-
 #pragma mark - BlePeripheral
 
 BlePeripheral::BlePeripheral(id<GNCPeripheral> peripheral)
-    : peripheral_(peripheral), unique_id_(peripheral.identifier.hash) {}
+    : api::ble::BlePeripheral(peripheral.identifier.hash), peripheral_(peripheral) {}
 
-std::string BlePeripheral::GetAddress() const { return ""; }
-
-api::ble_v2::BlePeripheral::UniqueId BlePeripheral::GetUniqueId() const { return unique_id_; }
+api::ble::BlePeripheral& BlePeripheral::DefaultBlePeripheral() {
+  static api::ble::BlePeripheral* default_peripheral =
+      new api::ble::BlePeripheral(0xffffffffffffffff);
+  return *default_peripheral;
+}
 
 id<GNCPeripheral> BlePeripheral::GetPeripheral() const { return peripheral_; }
 

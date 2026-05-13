@@ -18,7 +18,6 @@
 #include <windows.h>
 #include <wtsapi32.h>
 
-#include <filesystem>  // NOLINT
 #include <functional>
 #include <optional>
 #include <string>
@@ -26,61 +25,25 @@
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
 #include "internal/base/files.h"
+#include "internal/base/file_path.h"
 #include "internal/platform/implementation/device_info.h"
+#include "internal/platform/implementation/windows/device_paths.h"
 #include "internal/platform/implementation/windows/string_utils.h"
-#include "internal/platform/logging.h"
-#include "winrt/Windows.Foundation.Collections.h"
-#include "winrt/Windows.Foundation.h"
-#include "winrt/Windows.System.h"
+#include "internal/platform/implementation/windows/utils.h"
 
-namespace nearby {
-namespace windows {
-
-using IInspectable = winrt::Windows::Foundation::IInspectable;
-using KnownUserProperties = winrt::Windows::System::KnownUserProperties;
-using User = winrt::Windows::System::User;
-using UserType = winrt::Windows::System::UserType;
-using UserAuthenticationStatus =
-    winrt::Windows::System::UserAuthenticationStatus;
+namespace nearby::windows {
 
 using ::nearby::windows::string_utils::WideStringToString;
 
-template <typename T>
-using IVectorView = winrt::Windows::Foundation::Collections::IVectorView<T>;
-
-template <typename T>
-using IAsyncOperation = winrt::Windows::Foundation::IAsyncOperation<T>;
-
-constexpr char logs_relative_path[] = "Google\\Nearby\\Sharing\\Logs";
-constexpr char crash_dumps_relative_path[] =
-    "Google\\Nearby\\Sharing\\CrashDumps";
-
 std::optional<std::string> DeviceInfo::GetOsDeviceName() const {
-  DWORD size = 0;
-
-  // Get length of the computer name.
-  if (GetComputerNameExW(ComputerNameDnsHostname, nullptr, &size) == 0) {
-    if (GetLastError() != ERROR_MORE_DATA) {
-      LOG(ERROR) << ": Failed to get device name size, error:"
-                 << GetLastError();
-      return std::nullopt;
-    }
+  std::optional<std::wstring> device_name = GetDnsHostName();
+  if (device_name.has_value()) {
+    return WideStringToString(*device_name);
   }
-  std::wstring device_name(size, L' ');
-  if (GetComputerNameExW(ComputerNameDnsHostname, device_name.data(), &size) !=
-      0) {
-    // On input size includes null termination.
-    // On output size excludes null termination.
-    device_name.resize(size);
-    return WideStringToString(device_name);
-  }
-
-  LOG(ERROR) << ": Failed to get device name, error:" << GetLastError();
   return std::nullopt;
 }
 
 api::DeviceInfo::DeviceType DeviceInfo::GetDeviceType() const {
-  // TODO(b/230132370): return correct device type on the Windows platform.
   return api::DeviceInfo::DeviceType::kLaptop;
 }
 
@@ -88,78 +51,41 @@ api::DeviceInfo::OsType DeviceInfo::GetOsType() const {
   return api::DeviceInfo::OsType::kWindows;
 }
 
-std::optional<std::filesystem::path> DeviceInfo::GetDownloadPath() const {
+FilePath DeviceInfo::GetDownloadPath() const {
   PWSTR path;
   HRESULT result =
       SHGetKnownFolderPath(FOLDERID_Downloads, KF_FLAG_DEFAULT, nullptr, &path);
   if (result == S_OK) {
     std::wstring download_path{path};
     CoTaskMemFree(path);
-    return std::filesystem::path(download_path);
+    return FilePath(std::wstring_view(download_path));
   }
 
   CoTaskMemFree(path);
-  return std::nullopt;
+  return Files::GetTemporaryDirectory();
 }
 
-std::optional<std::filesystem::path> DeviceInfo::GetLocalAppDataPath() const {
-  PWSTR path;
-  HRESULT result = SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_DEFAULT,
-                                        /*hToken=*/nullptr, &path);
-  if (result == S_OK) {
-    std::wstring local_appdata_path{path};
-    CoTaskMemFree(path);
-    return std::filesystem::path(local_appdata_path);
-  }
-
-  CoTaskMemFree(path);
-  return std::nullopt;
+FilePath DeviceInfo::GetLocalAppDataPath(FilePath sub_path) const {
+  return nearby::platform::windows::GetLocalAppDataPath(sub_path);
 }
 
-std::optional<std::filesystem::path> DeviceInfo::GetCommonAppDataPath() const {
-  PWSTR path;
-  HRESULT result = SHGetKnownFolderPath(FOLDERID_ProgramData, KF_FLAG_DEFAULT,
-                                        /*hToken=*/nullptr, &path);
-  if (result == S_OK) {
-    std::wstring common_app_data_path{path};
-    CoTaskMemFree(path);
-    return std::filesystem::path(common_app_data_path);
-  }
-
-  CoTaskMemFree(path);
-  return std::nullopt;
+FilePath DeviceInfo::GetTemporaryPath() const {
+  return Files::GetTemporaryDirectory();
 }
 
-std::optional<std::filesystem::path> DeviceInfo::GetTemporaryPath() const {
-  return nearby::sharing::GetTemporaryDirectory();
-}
-
-std::optional<std::filesystem::path> DeviceInfo::GetLogPath() const {
-  auto prefix_path = GetLocalAppDataPath();
-  if (prefix_path.has_value()) {
-    return std::filesystem::path(prefix_path.value() / logs_relative_path);
-  }
-  return std::nullopt;
-}
-
-std::optional<std::filesystem::path> DeviceInfo::GetCrashDumpPath() const {
-  auto prefix_path = GetLocalAppDataPath();
-  if (prefix_path.has_value()) {
-    return std::filesystem::path(prefix_path.value() /
-                                 crash_dumps_relative_path);
-  }
-  return std::nullopt;
+FilePath DeviceInfo::GetLogPath() const {
+  return nearby::platform::windows::GetLogPath();
 }
 
 bool DeviceInfo::IsScreenLocked() const {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   return session_manager_.IsScreenLocked();
 }
 
 void DeviceInfo::RegisterScreenLockedListener(
     absl::string_view listener_name,
     std::function<void(api::DeviceInfo::ScreenStatus)> callback) {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   session_manager_.RegisterSessionListener(
       listener_name,
       [callback = std::move(callback)](SessionManager::SessionState state) {
@@ -173,19 +99,18 @@ void DeviceInfo::RegisterScreenLockedListener(
 
 void DeviceInfo::UnregisterScreenLockedListener(
     absl::string_view listener_name) {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   session_manager_.UnregisterSessionListener(listener_name);
 }
 
 bool DeviceInfo::PreventSleep() {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   return session_manager_.PreventSleep();
 }
 
 bool DeviceInfo::AllowSleep() {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   return session_manager_.AllowSleep();
 }
 
-}  // namespace windows
-}  // namespace nearby
+}  // namespace nearby::windows

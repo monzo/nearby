@@ -1,4 +1,4 @@
-// Copyright 2020 Google LLC
+// Copyright 2020-2025 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,55 +16,27 @@
 
 #include <windows.h>
 
+#include <cstdint>
+#include <cstring>
+#include <optional>
+#include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "gtest/gtest.h"
+#include "internal/platform/implementation/windows/string_utils.h"
+#include "internal/platform/logging.h"
+#include "internal/platform/uuid.h"
+#include "winrt/Windows.Foundation.h"
 #include "winrt/base.h"
 
 namespace nearby {
 namespace windows {
+namespace {
+using ::winrt::Windows::Foundation::IInspectable;
+using ::winrt::Windows::Foundation::PropertyValue;
 
-TEST(UtilsTests, MacAddressToString) {
-  // Arrange
-  const uint64_t input = 0x000034363bc70c71;
-  std::string expected = "34:36:3B:C7:0C:71";
-
-  // Act
-  std::string result = uint64_to_mac_address_string(input);
-
-  // Assert
-  EXPECT_EQ(result, expected);
-}
-
-TEST(UtilsTests, StringToMacAddress) {
-  // Arrange
-  std::string input = "34:36:3B:C7:8C:71";
-  const uint64_t expected = 0x000034363bc78c71;
-
-  // Act
-  uint64_t result = mac_address_string_to_uint64(input);
-
-  // Assert
-  EXPECT_EQ(result, expected);
-}
-
-constexpr absl::string_view kIpDotdecimal{"192.168.1.37"};
-
-constexpr char kIp4Bytes[] = {(char)192, (char)168, (char)1, (char)37};
-
-TEST(UtilsTests, Ip4BytesToDotdecimal) {
-  std::string result =
-      ipaddr_4bytes_to_dotdecimal_string(absl::string_view(kIp4Bytes));
-
-  EXPECT_EQ(result, kIpDotdecimal);
-}
-
-TEST(UtilsTests, IpDotdecimalTo4Bytes) {
-  std::string result =
-      ipaddr_dotdecimal_to_4bytes_string(std::string(kIpDotdecimal));
-
-  EXPECT_EQ(result, std::string(kIp4Bytes, 4));
-}
+}  // namespace
 
 TEST(UtilsTests, ConvertBetweenWinrtGuidAndNearbyUuidSuccessfully) {
   Uuid uuid(0x123e4567e89b12d3, 0xa456426614174000);
@@ -80,6 +52,65 @@ TEST(UtilsTests, CompareWinrtGuidAndNearbyUuidSuccessfully) {
   winrt::guid guid("123e4567-e89b-12d3-a456-426614074000");
 
   EXPECT_NE(uuid, winrt_guid_to_nearby_uuid(guid));
+}
+
+TEST(UtilsTests, InspectableReader_ReadBoolean) {
+  EXPECT_TRUE(
+      InspectableReader::ReadBoolean(PropertyValue::CreateBoolean(true)));
+  EXPECT_FALSE(
+      InspectableReader::ReadBoolean(PropertyValue::CreateBoolean(false)));
+  EXPECT_FALSE(InspectableReader::ReadBoolean(nullptr));
+  EXPECT_THROW(InspectableReader::ReadBoolean(PropertyValue::CreateString(L"")),
+               std::invalid_argument);
+}
+
+TEST(UtilsTests, InspectableReader_ReadUint16) {
+  EXPECT_EQ(InspectableReader::ReadUint16(PropertyValue::CreateUInt16(123)),
+            123);
+  EXPECT_EQ(InspectableReader::ReadUint16(nullptr), 0);
+  EXPECT_THROW(InspectableReader::ReadUint16(PropertyValue::CreateString(L"")),
+               std::invalid_argument);
+}
+
+TEST(UtilsTests, InspectableReader_ReadUint32) {
+  EXPECT_EQ(InspectableReader::ReadUint32(PropertyValue::CreateUInt32(456)),
+            456);
+  EXPECT_EQ(InspectableReader::ReadUint32(nullptr), 0);
+  EXPECT_THROW(InspectableReader::ReadUint32(PropertyValue::CreateString(L"")),
+               std::invalid_argument);
+}
+
+TEST(UtilsTests, InspectableReader_ReadString) {
+  EXPECT_EQ(InspectableReader::ReadString(
+                PropertyValue::CreateString(L"test string")),
+            "test string");
+  EXPECT_EQ(InspectableReader::ReadString(nullptr), "");
+  EXPECT_THROW(
+      InspectableReader::ReadString(PropertyValue::CreateBoolean(true)),
+      std::invalid_argument);
+}
+
+TEST(UtilsTests, InspectableReader_ReadStringArray) {
+  winrt::com_array<winrt::hstring> string_array = {L"a", L"b", L"c"};
+  std::vector<std::string> expected = {"a", "b", "c"};
+  IInspectable inspectable = PropertyValue::CreateStringArray(string_array);
+  EXPECT_EQ(InspectableReader::ReadStringArray(inspectable), expected);
+  EXPECT_TRUE(InspectableReader::ReadStringArray(nullptr).empty());
+  EXPECT_THROW(
+      InspectableReader::ReadStringArray(PropertyValue::CreateBoolean(true)),
+      std::invalid_argument);
+}
+
+TEST(UtilsTests, GetDnsHostName) {
+  std::optional<std::wstring> host_name = GetDnsHostName();
+  ASSERT_TRUE(host_name.has_value());
+  LOG(ERROR) << "host_name: "
+             << nearby::windows::string_utils::WideStringToString(*host_name);
+}
+
+TEST(UtilsTests, IsIntelWifiAdapter) {
+  bool is_intel_wifi_adapter = IsIntelWifiAdapter();
+  LOG(ERROR) << "is_intel_wifi_adapter: " << is_intel_wifi_adapter;
 }
 
 }  // namespace windows

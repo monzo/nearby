@@ -76,9 +76,7 @@ class WebRtcMedium {
 
   // Gets the default two-letter country code associated with current locale.
   // For example, en_US locale resolves to "US".
-  const std::string GetDefaultCountryCode() {
-    return impl_->GetDefaultCountryCode();
-  }
+  std::string GetDefaultCountryCode() { return impl_->GetDefaultCountryCode(); }
 
   void SetNonCellular(bool non_cellular) {
     non_cellular_ = non_cellular;
@@ -92,7 +90,7 @@ class WebRtcMedium {
             .GetFlags()
             .support_web_rtc_non_cellular_medium && non_cellular_) {
       std::optional<webrtc::PeerConnectionFactoryInterface::Options> options;
-      options->network_ignore_mask |= rtc::ADAPTER_TYPE_CELLULAR;
+      options->network_ignore_mask |= webrtc::ADAPTER_TYPE_CELLULAR;
       impl_->CreatePeerConnection(options, observer, std::move(callback));
     } else {
       impl_->CreatePeerConnection(observer, std::move(callback));

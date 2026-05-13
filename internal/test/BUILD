@@ -12,37 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-licenses(["notice"])
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
 
-cc_library(
-    name = "mocks",
-    testonly = 1,
-    hdrs = [
-        "mock_account_manager.h",
-        "mock_account_observer.h",
-    ],
-    visibility = ["//visibility:public"],
-    deps = [
-        "//internal/platform/implementation:account_manager",
-        "//internal/platform/implementation:signin_attempt",
-        "@com_google_absl//absl/functional:any_invocable",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/strings:string_view",
-        "@com_google_googletest//:gtest_for_library_testonly",
-    ],
-)
+licenses(["notice"])
 
 cc_library(
     name = "test",
     srcs = [
-        "fake_account_manager.cc",
         "fake_clock.cc",
         "fake_single_thread_executor.cc",
         "fake_task_runner.cc",
         "fake_timer.cc",
     ],
     hdrs = [
-        "fake_account_manager.h",
         "fake_clock.h",
         "fake_device_info.h",
         "fake_http_client.h",
@@ -56,12 +39,12 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        "//internal/base",
+        "//internal/base:file_path",
+        "//internal/base:files",
         "//internal/network:types",
         "//internal/platform:comm",
+        "//internal/platform:logging",
         "//internal/platform:types",
-        "//internal/platform/implementation:account_manager",
-        "//internal/platform/implementation:signin_attempt",
         "//internal/platform/implementation:types",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -71,7 +54,6 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
-        "@com_google_absl//absl/types:span",  # fixdeps: keep
     ],
 )
 
@@ -92,11 +74,13 @@ cc_test(
     shard_count = 8,
     deps = [
         ":test",
+        "//internal/base:file_path",
+        "//internal/base:files",
         "//internal/network:types",
         "//internal/network:url",
-        "//internal/platform:types",
+        "//internal/platform:logging",
+        "//internal/platform/implementation:platform_impl",
         "//internal/platform/implementation:types",
-        "//internal/platform/implementation/g3",  # fixdeps: keep
         "@com_github_protobuf_matchers//protobuf-matchers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/status",

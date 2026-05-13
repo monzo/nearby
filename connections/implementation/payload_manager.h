@@ -26,7 +26,6 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/time/time.h"
-#include "connections/implementation/analytics/packet_meta_data.h"
 #include "connections/implementation/client_proxy.h"
 #include "connections/implementation/endpoint_manager.h"
 #include "connections/implementation/internal_payload.h"
@@ -67,8 +66,7 @@ class PayloadManager : public EndpointManager::FrameProcessor {
   void OnIncomingFrame(
       location::nearby::connections::OfflineFrame& offline_frame,
       const std::string& from_endpoint_id, ClientProxy* to_client,
-      location::nearby::proto::connections::Medium current_medium,
-      analytics::PacketMetaData& packet_meta_data) override;
+      location::nearby::proto::connections::Medium current_medium) override;
 
   // @EndpointManagerThread
   void OnEndpointDisconnect(
@@ -311,9 +309,7 @@ class PayloadManager : public EndpointManager::FrameProcessor {
   int GetOptimalChunkSize(EndpointIds endpoint_ids);
 
   location::nearby::connections::PayloadTransferFrame::PayloadHeader
-  CreatePayloadHeader(const InternalPayload& internal_payload, size_t offset,
-                      const std::string& parent_folder,
-                      const std::string& file_name);
+  CreatePayloadHeader(const InternalPayload& internal_payload, size_t offset);
 
   location::nearby::connections::PayloadTransferFrame::PayloadChunk
   CreatePayloadChunk(std::int64_t offset, ByteArray body, int index);
@@ -325,9 +321,13 @@ class PayloadManager : public EndpointManager::FrameProcessor {
                  LAST_CHUNK) != 0);
   }
 
+  // Creates an incoming payload and returns a handle to it.
+  // If `save_path` is empty, the payload will be saved to the default save
+  // path set in `SetCustomSavePath()`.
   ErrorOr<PendingPayloadHandle> CreateIncomingPayload(
       const location::nearby::connections::PayloadTransferFrame& frame,
-      const std::string& endpoint_id) ABSL_LOCKS_EXCLUDED(mutex_);
+      const std::string& endpoint_id,
+      const std::string& save_path) ABSL_LOCKS_EXCLUDED(mutex_);
 
   Payload::Id CreateOutgoingPayload(Payload payload,
                                     const EndpointIds& endpoint_ids)
@@ -410,8 +410,7 @@ class PayloadManager : public EndpointManager::FrameProcessor {
                          const std::string& from_endpoint_id,
                          location::nearby::connections::PayloadTransferFrame&
                              payload_transfer_frame,
-                         location::nearby::proto::connections::Medium medium,
-                         analytics::PacketMetaData& packet_meta_data);
+                         location::nearby::proto::connections::Medium medium);
   void ProcessControlPacket(ClientProxy* to_client,
                             const std::string& from_endpoint_id,
                             location::nearby::connections::PayloadTransferFrame&

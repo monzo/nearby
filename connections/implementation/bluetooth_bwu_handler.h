@@ -17,7 +17,6 @@
 
 #include <memory>
 #include <string>
-#include <utility>
 
 #include "connections/implementation/base_bwu_handler.h"
 #include "connections/implementation/client_proxy.h"
@@ -27,7 +26,6 @@
 #include "connections/implementation/mediums/mediums.h"
 #include "connections/medium_selector.h"
 #include "internal/platform/bluetooth_classic.h"
-#include "internal/platform/byte_array.h"
 #include "internal/platform/expected.h"
 
 namespace nearby {
@@ -57,17 +55,17 @@ class BluetoothBwuHandler : public BaseBwuHandler {
   };
 
   // BwuHandler implementation:
-  ErrorOr<std::unique_ptr<EndpointChannel>>
-  CreateUpgradedEndpointChannel(ClientProxy* client,
-                                const std::string& service_id,
-                                const std::string& endpoint_id,
-                                const UpgradePathInfo& upgrade_path_info) final;
+  ErrorOr<std::unique_ptr<EndpointChannel>> CreateUpgradedEndpointChannel(
+      ClientProxy* client, const std::string& service_id,
+      const std::string& endpoint_id,
+      const location::nearby::connections::BandwidthUpgradeNegotiationFrame::
+          UpgradePathInfo& upgrade_path_info) final;
   Medium GetUpgradeMedium() const final { return Medium::BLUETOOTH; }
   void OnEndpointDisconnect(ClientProxy* client,
                             const std::string& endpoint_id) final {}
 
   // BaseBwuHandler implementation:
-  ByteArray HandleInitializeUpgradedMediumForEndpoint(
+  std::string HandleInitializeUpgradedMediumForEndpoint(
       ClientProxy* client, const std::string& upgrade_service_id,
       const std::string& endpoint_id) final;
   void HandleRevertInitiatorStateForService(

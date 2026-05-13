@@ -30,6 +30,10 @@ class ByteArray {
   using iterator = std::string::iterator;
   using const_iterator = std::string::const_iterator;
 
+  static ByteArray FromStringView(absl::string_view source) {
+    return ByteArray(source.data(), source.size());
+  }
+
   // Create an empty ByteArray
   ByteArray() = default;
   template <size_t N>

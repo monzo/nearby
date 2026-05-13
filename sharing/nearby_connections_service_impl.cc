@@ -19,22 +19,30 @@
 #include <functional>
 #include <memory>
 #include <optional>
-#include <ostream>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
-#include "absl/meta/type_traits.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
+#include "connections/advertising_options.h"
+#include "connections/connection_options.h"
+#include "connections/core.h"
+#include "connections/discovery_options.h"
+#include "connections/implementation/service_controller_router.h"
 #include "connections/listeners.h"
 #include "connections/medium_selector.h"
+#include "connections/params.h"
 #include "connections/payload.h"
+#include "connections/payload_type.h"
+#include "connections/status.h"
 #include "connections/strategy.h"
 #include "internal/analytics/event_logger.h"
+#include "internal/platform/byte_array.h"
 #include "internal/platform/logging.h"
+#include "internal/platform/mac_address.h"
 #include "sharing/internal/public/connectivity_manager.h"
 #include "sharing/nearby_connections_service.h"
 #include "sharing/nearby_connections_types.h"
@@ -43,7 +51,24 @@ namespace nearby {
 namespace sharing {
 namespace {
 
-Core* GetService(NearbyConnectionsService::HANDLE handle) {
+using ::nearby::connections::ConnectionRequestInfo;
+using ::nearby::connections::ConnectionResponseInfo;
+using ::nearby::connections::Core;
+using ::nearby::connections::PayloadProgressInfo;
+using ::nearby::connections::PayloadType;
+using ::nearby::connections::ServiceControllerRouter;
+
+using NcAdvertisingOptions = ::nearby::connections::AdvertisingOptions;
+using NcConnectionOptions = ::nearby::connections::ConnectionOptions;
+using NcDiscoveryListener = ::nearby::connections::DiscoveryListener;
+using NcDiscoveryOptions = ::nearby::connections::DiscoveryOptions;
+using NcDistanceInfo = ::nearby::connections::DistanceInfo;
+using NcMedium = ::nearby::connections::Medium;
+using NcPayload = ::nearby::connections::Payload;
+using NcPayloadListener = ::nearby::connections::PayloadListener;
+using NcStatus = ::nearby::connections::Status;
+
+Core* GetService(NearbyConnectionsServiceImpl::HANDLE handle) {
   return reinterpret_cast<Core*>(handle);
 }
 
@@ -68,7 +93,7 @@ NearbyConnectionsServiceImpl::~NearbyConnectionsServiceImpl() = default;
 
 void NearbyConnectionsServiceImpl::StartAdvertising(
     absl::string_view service_id, const std::vector<uint8_t>& endpoint_info,
-    AdvertisingOptions advertising_options,
+    const AdvertisingOptions& advertising_options,
     ConnectionListener advertising_listener,
     std::function<void(Status status)> callback) {
   advertising_listener_ = std::move(advertising_listener);
@@ -86,15 +111,16 @@ void NearbyConnectionsServiceImpl::StartAdvertising(
       advertising_options.enable_bluetooth_listening;
   options.enable_webrtc_listening = advertising_options.enable_webrtc_listening;
   options.use_stable_endpoint_id = advertising_options.use_stable_endpoint_id;
+  options.force_new_endpoint_id = advertising_options.force_new_endpoint_id;
   options.fast_advertisement_service_uuid =
       advertising_options.fast_advertisement_service_uuid.uuid;
 
-  NcConnectionRequestInfo connection_request_info;
+  ConnectionRequestInfo connection_request_info;
   connection_request_info.endpoint_info =
-      NcByteArray(std::string(endpoint_info.begin(), endpoint_info.end()));
+      ByteArray(std::string(endpoint_info.begin(), endpoint_info.end()));
   connection_request_info.listener.initiated_cb =
       [&](const std::string& endpoint_id,
-          const NcConnectionResponseInfo& info) {
+          const ConnectionResponseInfo& info) {
         ConnectionInfo connection_info;
         connection_info.authentication_token = info.authentication_token;
         std::string remote_end_point = std::string(info.remote_endpoint_info);
@@ -138,13 +164,16 @@ void NearbyConnectionsServiceImpl::StopAdvertising(
 }
 
 void NearbyConnectionsServiceImpl::StartDiscovery(
-    absl::string_view service_id, DiscoveryOptions discovery_options,
+    absl::string_view service_id, const DiscoveryOptions& discovery_options,
     DiscoveryListener discovery_listener,
     std::function<void(Status status)> callback) {
   discovery_listener_ = std::move(discovery_listener);
 
   NcDiscoveryOptions options{};
   options.strategy = ConvertToServiceStrategy(discovery_options.strategy);
+  // NcDiscoveryOptions enabled all mediums by default, we should apply the
+  // settings from discovery_options.
+  options.allowed.SetAll(false);
   options.allowed.ble = discovery_options.allowed_mediums.ble;
   options.allowed.bluetooth = discovery_options.allowed_mediums.bluetooth;
   options.allowed.web_rtc = discovery_options.allowed_mediums.web_rtc;
@@ -156,9 +185,15 @@ void NearbyConnectionsServiceImpl::StartDiscovery(
 
   options.is_out_of_band_connection =
       discovery_options.is_out_of_band_connection;
+
+  if (discovery_options.alternate_service_uuid.has_value()) {
+    options.ble_options.alternate_uuid =
+        discovery_options.alternate_service_uuid;
+  }
+
   NcDiscoveryListener listener;
   listener.endpoint_found_cb = [this](const std::string& endpoint_id,
-                                      const NcByteArray& endpoint_info,
+                                      const ByteArray& endpoint_info,
                                       const std::string& service_id) {
     std::string endpoint_info_data = std::string(endpoint_info);
     discovery_listener_.endpoint_found_cb(
@@ -188,7 +223,7 @@ void NearbyConnectionsServiceImpl::StopDiscovery(
 
 void NearbyConnectionsServiceImpl::RequestConnection(
     absl::string_view service_id, const std::vector<uint8_t>& endpoint_info,
-    absl::string_view endpoint_id, ConnectionOptions connection_options,
+    absl::string_view endpoint_id, const ConnectionOptions& connection_options,
     ConnectionListener connection_listener,
     std::function<void(Status status)> callback) {
   connection_listener_ = std::move(connection_listener);
@@ -208,18 +243,20 @@ void NearbyConnectionsServiceImpl::RequestConnection(
         *connection_options.keep_alive_timeout / absl::Milliseconds(1);
   }
   if (connection_options.remote_bluetooth_mac_address.has_value()) {
-    auto mac_address = *connection_options.remote_bluetooth_mac_address;
-    options.remote_bluetooth_mac_address =
-        NcByteArray(std::string(mac_address.begin(), mac_address.end()));
+    MacAddress mac_address;
+    MacAddress::FromBytes(
+        absl::MakeConstSpan(*connection_options.remote_bluetooth_mac_address),
+        mac_address);
+    options.remote_bluetooth_mac_address = mac_address;
   }
   options.non_disruptive_hotspot_mode =
       connection_options.non_disruptive_hotspot_mode;
-  NcConnectionRequestInfo connection_request_info;
+  ConnectionRequestInfo connection_request_info;
   connection_request_info.endpoint_info =
-      NcByteArray(std::string(endpoint_info.begin(), endpoint_info.end()));
+      ByteArray(std::string(endpoint_info.begin(), endpoint_info.end()));
   connection_request_info.listener.initiated_cb =
       [&](const std::string& endpoint_id,
-          const NcConnectionResponseInfo& info) {
+          const ConnectionResponseInfo& info) {
         ConnectionInfo connection_info;
         connection_info.authentication_token = info.authentication_token;
         std::string remote_end_point = std::string(info.remote_endpoint_info);
@@ -299,11 +336,11 @@ void NearbyConnectionsServiceImpl::AcceptConnection(
               return;
             }
 
-            NEARBY_VLOG(1) << "payload callback id=" << payload.GetId();
+            VLOG(1) << "payload callback id=" << payload.GetId();
 
             switch (payload.GetType()) {
-              case NcPayloadType::kBytes:
-              case NcPayloadType::kFile:
+              case PayloadType::kBytes:
+              case PayloadType::kFile:
                 payload_listener->second.payload_cb(
                     endpoint_id, ConvertToPayload(std::move(payload)));
                 break;
@@ -314,13 +351,13 @@ void NearbyConnectionsServiceImpl::AcceptConnection(
           },
       .payload_progress_cb =
           [&](absl::string_view endpoint_id,
-              const NcPayloadProgressInfo& info) {
+              const PayloadProgressInfo& info) {
             PayloadTransferUpdate transfer_update;
             transfer_update.bytes_transferred = info.bytes_transferred;
             transfer_update.payload_id = info.payload_id;
             transfer_update.status = static_cast<PayloadStatus>(info.status);
             transfer_update.total_bytes = info.total_bytes;
-            NEARBY_VLOG(1) << "payload transfer update id=" << info.payload_id;
+            VLOG(1) << "payload transfer update id=" << info.payload_id;
             auto payload_listener = payload_listeners_.find(endpoint_id);
             if (payload_listener != payload_listeners_.end()) {
               payload_listener->second.payload_progress_cb(endpoint_id,
@@ -342,6 +379,11 @@ void NearbyConnectionsServiceImpl::SetCustomSavePath(
     absl::string_view path, std::function<void(Status status)> callback) {
   GetService(service_handle_)
       ->SetCustomSavePath(path, BuildResultCallback(callback));
+}
+
+void NearbyConnectionsServiceImpl::OverrideSavePath(
+    absl::string_view endpoint_id, absl::string_view path) {
+  GetService(service_handle_)->OverrideSavePath(endpoint_id, path);
 }
 
 std::string NearbyConnectionsServiceImpl::Dump() const {

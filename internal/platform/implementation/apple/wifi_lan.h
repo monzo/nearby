@@ -1,4 +1,4 @@
-// Copyright 2020 Google LLC
+// Copyright 2025 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,11 +21,12 @@
 #include <string>
 #include <utility>
 
+#include "absl/strings/string_view.h"
+#include "internal/platform/implementation/upgrade_address_info.h"
 #include "internal/platform/implementation/wifi_lan.h"
 #include "internal/platform/nsd_service_info.h"
+#include "internal/platform/service_address.h"
 
-@class GNCMBonjourBrowser;
-@class GNCMBonjourService;
 @class GNCNWFramework;
 @class GNCNWFrameworkServerSocket;
 @class GNCNWFrameworkSocket;
@@ -56,7 +57,7 @@ class WifiLanOutputStream : public OutputStream {
   explicit WifiLanOutputStream(GNCNWFrameworkSocket* socket);
   ~WifiLanOutputStream() override = default;
 
-  Exception Write(const ByteArray& data) override;
+  Exception Write(absl::string_view data) override;
   Exception Flush() override;
   Exception Close() override;
 
@@ -105,6 +106,8 @@ class WifiLanServerSocket : public api::WifiLanServerSocket {
 class WifiLanMedium : public api::WifiLanMedium {
  public:
   WifiLanMedium();
+  // For testing only.
+  explicit WifiLanMedium(GNCNWFramework* medium);
   ~WifiLanMedium() override = default;
 
   WifiLanMedium(const WifiLanMedium&) = delete;
@@ -122,11 +125,13 @@ class WifiLanMedium : public api::WifiLanMedium {
   std::unique_ptr<api::WifiLanSocket> ConnectToService(
       const NsdServiceInfo& remote_service_info, CancellationFlag* cancellation_flag) override;
   std::unique_ptr<api::WifiLanSocket> ConnectToService(
-      const std::string& ip_address, int port, CancellationFlag* cancellation_flag) override;
+      const ServiceAddress& service_address, CancellationFlag* cancellation_flag) override;
   std::unique_ptr<api::WifiLanServerSocket> ListenForService(int port) override;
+  api::UpgradeAddressInfo GetUpgradeAddressCandidates(const api::WifiLanServerSocket& server_socket) override;
 
  private:
   GNCNWFramework* medium_;
+  DiscoveredServiceCallback service_callback_;
   absl::AnyInvocable<void(NsdServiceInfo)> service_discovered_cb_;
   absl::AnyInvocable<void(NsdServiceInfo)> service_lost_cb_;
 };

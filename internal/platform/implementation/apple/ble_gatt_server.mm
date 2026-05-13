@@ -17,22 +17,22 @@
 #import <CoreBluetooth/CoreBluetooth.h>
 #import <Foundation/Foundation.h>
 
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 
-#import "internal/platform/implementation/apple/Mediums/BLEv2/GNCBLEGATTServer.h"
+#import "internal/platform/implementation/apple/Log/GNCLogger.h"
+#import "internal/platform/implementation/apple/Mediums/BLE/GNCBLEGATTServer.h"
 #import "internal/platform/implementation/apple/ble_utils.h"
 #import "internal/platform/implementation/apple/utils.h"
-#import "GoogleToolboxForMac/GTMLogger.h"
 
 namespace nearby {
 namespace apple {
 
 GattServer::GattServer(GNCBLEGATTServer *gatt_server) : gatt_server_(gatt_server) {}
 
-std::optional<api::ble_v2::GattCharacteristic> GattServer::CreateCharacteristic(
+std::optional<api::ble::GattCharacteristic> GattServer::CreateCharacteristic(
     const Uuid &service_uuid, const Uuid &characteristic_uuid,
-    api::ble_v2::GattCharacteristic::Permission permission,
-    api::ble_v2::GattCharacteristic::Property property) {
+    api::ble::GattCharacteristic::Permission permission,
+    api::ble::GattCharacteristic::Property property) {
   CBUUID *serviceUUID = CBUUID128FromCPP(service_uuid);
   CBUUID *characteristicUUID = CBUUID128FromCPP(characteristic_uuid);
   CBAttributePermissions permissions = CBAttributePermissionsFromCPP(permission);
@@ -49,7 +49,7 @@ std::optional<api::ble_v2::GattCharacteristic> GattServer::CreateCharacteristic(
                                                     NSError *error) {
                                   [condition lock];
                                   if (error != nil) {
-                                    GTMLoggerError(@"Error creating characteristic: %@", error);
+                                    GNCLoggerError(@"Error creating characteristic: %@", error);
                                   }
                                   blockCharacteristic = characteristic;
                                   [condition signal];
@@ -63,7 +63,7 @@ std::optional<api::ble_v2::GattCharacteristic> GattServer::CreateCharacteristic(
   return CPPGATTCharacteristicFromObjC(blockCharacteristic);
 }
 
-bool GattServer::UpdateCharacteristic(const api::ble_v2::GattCharacteristic &characteristic,
+bool GattServer::UpdateCharacteristic(const api::ble::GattCharacteristic &characteristic,
                                       const nearby::ByteArray &value) {
   NSCondition *condition = [[NSCondition alloc] init];
   [condition lock];
@@ -73,7 +73,7 @@ bool GattServer::UpdateCharacteristic(const api::ble_v2::GattCharacteristic &cha
                    completionHandler:^(NSError *error) {
                      [condition lock];
                      if (error != nil) {
-                       GTMLoggerError(@"Error updating characteristic: %@", error);
+                       GNCLoggerError(@"Error updating characteristic: %@", error);
                      }
                      blockError = error;
                      [condition signal];
@@ -86,19 +86,11 @@ bool GattServer::UpdateCharacteristic(const api::ble_v2::GattCharacteristic &cha
 
 // TODO(b/290385712): Implement.
 absl::Status GattServer::NotifyCharacteristicChanged(
-    const api::ble_v2::GattCharacteristic &characteristic, bool confirm,
-    const ByteArray &new_value) {
+    const api::ble::GattCharacteristic &characteristic, bool confirm, const ByteArray &new_value) {
   return absl::UnimplementedError("");
 }
 
-void GattServer::Stop() {
-  [gatt_server_ stop];
-}
-
-// TODO(b/290385712): Implement.
-api::ble_v2::BlePeripheral &GattServer::GetBlePeripheral() {
-  return peripheral_;
-}
+void GattServer::Stop() { [gatt_server_ stop]; }
 
 }  // namespace apple
 }  // namespace nearby

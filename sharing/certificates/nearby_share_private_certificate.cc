@@ -68,7 +68,7 @@ absl::Duration GenerateRandomOffset() {
 // Generates a certificate identifier by hashing the input secret |key|.
 std::vector<uint8_t> CreateCertificateIdFromSecretKey(
     const crypto::SymmetricKey& key) {
-  NL_DCHECK_EQ(crypto::kSHA256Length, kNearbyShareNumBytesCertificateId);
+  DCHECK_EQ(crypto::kSHA256Length, kNearbyShareNumBytesCertificateId);
   std::vector<uint8_t> id(kNearbyShareNumBytesCertificateId);
   crypto::SHA256HashString(key.key(), id.data(), id.size());
 
@@ -92,12 +92,6 @@ std::optional<std::vector<uint8_t>> CreateMetadataEncryptionKeyTag(
   return result;
 }
 
-std::string EncodeString(absl::string_view unencoded_string) {
-  std::string result;
-  absl::WebSafeBase64Escape(unencoded_string, &result);
-  return result;
-}
-
 std::optional<std::string> DecodeString(const std::string* encoded_string) {
   std::string result;
   if (!encoded_string) return std::nullopt;
@@ -109,7 +103,8 @@ std::optional<std::string> DecodeString(const std::string* encoded_string) {
 }
 
 std::string BytesToEncodedString(const std::vector<uint8_t>& bytes) {
-  return EncodeString(std::string(bytes.begin(), bytes.end()));
+  return absl::WebSafeBase64Escape(std::string_view(
+      reinterpret_cast<const char*>(bytes.data()), bytes.size()));
 }
 
 std::optional<std::vector<uint8_t>> EncodedStringToBytes(
@@ -132,7 +127,7 @@ std::string SaltsToString(const std::set<std::vector<uint8_t>>& salts) {
 std::set<std::vector<uint8_t>> StringToSalts(absl::string_view str) {
   const size_t chars_per_salt =
       2 * kNearbyShareNumBytesMetadataEncryptionKeySalt;
-  NL_DCHECK_EQ(str.size() % chars_per_salt, 0);
+  DCHECK_EQ(str.size() % chars_per_salt, 0);
   std::set<std::vector<uint8_t>> salts;
   for (size_t i = 0; i < str.size(); i += chars_per_salt) {
     std::string bytes =
@@ -159,9 +154,8 @@ NearbySharePrivateCertificate::NearbySharePrivateCertificate(
           GenerateRandomBytes(kNearbyShareNumBytesMetadataEncryptionKey)),
       id_(CreateCertificateIdFromSecretKey(*secret_key_)),
       unencrypted_metadata_(std::move(unencrypted_metadata)) {
-  NL_DCHECK_NE(
-      static_cast<int>(visibility),
-      static_cast<int>(DeviceVisibility::DEVICE_VISIBILITY_UNSPECIFIED));
+  DCHECK_NE(static_cast<int>(visibility),
+            static_cast<int>(DeviceVisibility::DEVICE_VISIBILITY_UNSPECIFIED));
 }
 
 NearbySharePrivateCertificate::NearbySharePrivateCertificate(
@@ -180,9 +174,8 @@ NearbySharePrivateCertificate::NearbySharePrivateCertificate(
       id_(std::move(id)),
       unencrypted_metadata_(std::move(unencrypted_metadata)),
       consumed_salts_(std::move(consumed_salts)) {
-  NL_DCHECK_NE(
-      static_cast<int>(visibility),
-      static_cast<int>(DeviceVisibility::DEVICE_VISIBILITY_UNSPECIFIED));
+  DCHECK_NE(static_cast<int>(visibility),
+            static_cast<int>(DeviceVisibility::DEVICE_VISIBILITY_UNSPECIFIED));
 }
 
 NearbySharePrivateCertificate::NearbySharePrivateCertificate(
@@ -221,22 +214,22 @@ std::optional<NearbyShareEncryptedMetadataKey>
 NearbySharePrivateCertificate::EncryptMetadataKey() {
   std::optional<std::vector<uint8_t>> salt = GenerateUnusedSalt();
   if (!salt) {
-    NL_LOG(ERROR) << "Encryption failed: Salt generation unsuccessful.";
+    LOG(ERROR) << "Encryption failed: Salt generation unsuccessful.";
     return std::nullopt;
   }
 
   std::unique_ptr<crypto::Encryptor> encryptor =
       CreateNearbyShareCtrEncryptor(secret_key_.get(), *salt);
   if (!encryptor) {
-    NL_LOG(ERROR) << "Encryption failed: Could not create CTR encryptor.";
+    LOG(ERROR) << "Encryption failed: Could not create CTR encryptor.";
     return std::nullopt;
   }
 
-  NL_DCHECK_EQ(kNearbyShareNumBytesMetadataEncryptionKey,
-               metadata_encryption_key_.size());
+  DCHECK_EQ(kNearbyShareNumBytesMetadataEncryptionKey,
+            metadata_encryption_key_.size());
   std::vector<uint8_t> encrypted_metadata_key;
   if (!encryptor->Encrypt(metadata_encryption_key_, &encrypted_metadata_key)) {
-    NL_LOG(ERROR) << "Encryption failed: Could not encrypt metadata key.";
+    LOG(ERROR) << "Encryption failed: Could not encrypt metadata key.";
     return std::nullopt;
   }
 
@@ -250,7 +243,7 @@ std::optional<std::vector<uint8_t>> NearbySharePrivateCertificate::Sign(
 
   std::vector<uint8_t> signature;
   if (!signer->Sign(payload, &signature)) {
-    NL_LOG(ERROR) << "Signing failed.";
+    LOG(ERROR) << "Signing failed.";
     return std::nullopt;
   }
 
@@ -267,21 +260,21 @@ std::optional<nearby::sharing::proto::PublicCertificate>
 NearbySharePrivateCertificate::ToPublicCertificate() const {
   std::vector<uint8_t> public_key;
   if (!key_pair_->ExportPublicKey(&public_key)) {
-    NL_LOG(ERROR) << "Failed to export public key.";
+    LOG(ERROR) << "Failed to export public key.";
     return std::nullopt;
   }
 
   std::optional<std::vector<uint8_t>> encrypted_metadata_bytes =
       EncryptMetadata();
   if (!encrypted_metadata_bytes) {
-    NL_LOG(ERROR) << "Failed to encrypt metadata.";
+    LOG(ERROR) << "Failed to encrypt metadata.";
     return std::nullopt;
   }
 
   std::optional<std::vector<uint8_t>> metadata_encryption_key_tag =
       CreateMetadataEncryptionKeyTag(metadata_encryption_key_);
   if (!metadata_encryption_key_tag) {
-    NL_LOG(ERROR) << "Failed to compute metadata encryption key tag.";
+    LOG(ERROR) << "Failed to compute metadata encryption key tag.";
     return std::nullopt;
   }
 
@@ -299,8 +292,6 @@ NearbySharePrivateCertificate::ToPublicCertificate() const {
       ToJavaTime(not_before_ - not_before_offset) / 1000);
   public_certificate.mutable_end_time()->set_seconds(
       ToJavaTime(not_after_ + not_after_offset) / 1000);
-  public_certificate.set_for_selected_contacts(
-      visibility_ == DeviceVisibility::DEVICE_VISIBILITY_SELECTED_CONTACTS);
   public_certificate.set_metadata_encryption_key(std::string(
       metadata_encryption_key_.begin(), metadata_encryption_key_.end()));
   public_certificate.set_encrypted_metadata_bytes(std::string(
@@ -323,11 +314,11 @@ PrivateCertificateData NearbySharePrivateCertificate::ToCertificateData()
       .not_before = absl::ToUnixNanos(not_before_),
       .not_after = absl::ToUnixNanos(not_after_),
       .key_pair = BytesToEncodedString(key_pair),
-      .secret_key = EncodeString(secret_key_->key()),
+      .secret_key = absl::WebSafeBase64Escape(secret_key_->key()),
       .metadata_encryption_key = BytesToEncodedString(metadata_encryption_key_),
       .id = BytesToEncodedString(id_),
       .unencrypted_metadata_proto =
-          EncodeString(unencrypted_metadata_.SerializeAsString()),
+          absl::WebSafeBase64Escape(unencrypted_metadata_.SerializeAsString()),
       .consumed_salts = SaltsToString(consumed_salts_),
   };
 }
@@ -367,7 +358,7 @@ NearbySharePrivateCertificate::FromCertificateData(
 std::optional<std::vector<uint8_t>>
 NearbySharePrivateCertificate::GenerateUnusedSalt() {
   if (consumed_salts_.size() >= kNearbyShareMaxNumMetadataEncryptionKeySalts) {
-    NL_LOG(ERROR) << "All salts exhausted for certificate.";
+    LOG(ERROR) << "All salts exhausted for certificate.";
     return std::nullopt;
   }
 
@@ -381,7 +372,7 @@ NearbySharePrivateCertificate::GenerateUnusedSalt() {
       salt = next_salts_for_testing_.front();
       next_salts_for_testing_.pop();
     }
-    NL_DCHECK_EQ(2u, salt.size());
+    DCHECK_EQ(2u, salt.size());
 
     if (consumed_salts_.find(salt) == consumed_salts_.end()) {
       consumed_salts_.insert(salt);
@@ -389,8 +380,8 @@ NearbySharePrivateCertificate::GenerateUnusedSalt() {
     }
   }
 
-  NL_LOG(ERROR) << "Salt generation exceeded max number of retries. This is "
-                   "highly improbable.";
+  LOG(ERROR) << "Salt generation exceeded max number of retries. This is "
+                "highly improbable.";
   return std::nullopt;
 }
 

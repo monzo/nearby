@@ -17,7 +17,6 @@
 
 #include <stdint.h>
 
-#include <filesystem>  // NOLINT(build/c++17)
 #include <functional>
 #include <memory>
 #include <optional>
@@ -27,6 +26,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "internal/base/file_path.h"
 #include "sharing/common/nearby_share_enums.h"
 #include "sharing/nearby_connection.h"
 #include "sharing/nearby_connections_types.h"
@@ -103,6 +103,7 @@ class NearbyConnectionsManager {
                                 PowerLevel power_level,
                                 proto::DataUsage data_usage,
                                 bool use_stable_endpoint_id,
+                                bool force_new_endpoint_id,
                                 ConnectionsCallback callback) = 0;
 
   // Stops advertising through Nearby Connections.
@@ -112,6 +113,7 @@ class NearbyConnectionsManager {
   // `listener` remains valid until StopDiscovery is called.
   virtual void StartDiscovery(DiscoveryListener* listener,
                               proto::DataUsage data_usage,
+                              std::optional<uint16_t> alternate_service_uuid,
                               ConnectionsCallback callback) = 0;
 
   // Stops discovery through Nearby Connections.
@@ -154,9 +156,12 @@ class NearbyConnectionsManager {
 
   // Sets a custom save path.
   virtual void SetCustomSavePath(absl::string_view custom_save_path) = 0;
+  // Overrides the save path for transfers from a specific endpoint.
+  virtual void OverrideSavePath(absl::string_view endpoint_id,
+                                const FilePath& custom_save_path) = 0;
 
   // Gets the file paths to delete and clear the hash set.
-  virtual absl::flat_hash_set<std::filesystem::path>
+  virtual absl::flat_hash_set<FilePath>
   GetAndClearUnknownFilePathsToDelete() = 0;
 
   // Dump internal state for debugging purposes.

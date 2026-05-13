@@ -15,44 +15,36 @@
 #ifndef THIRD_PARTY_NEARBY_SHARING_INTERNAL_API_NETWORK_MONITOR_H_
 #define THIRD_PARTY_NEARBY_SHARING_INTERNAL_API_NETWORK_MONITOR_H_
 
-#include <functional>
-#include <string>
 #include <utility>
+
+#include "absl/functional/any_invocable.h"
 
 namespace nearby {
 namespace api {
 
 class NetworkMonitor {
  public:
-  enum class ConnectionType : int {
-    kUnknown = 0,  // A connection exists, but its type is unknown.
-                   // Also used as a default value.
-    kEthernet = 1,
-    kWifi = 2,
-    k2G = 3,
-    k3G = 4,
-    k4G = 5,
-    kNone = 6,  // No connection.
-    kBluetooth = 7,
-    k5G = 8,
-    kLast = k5G
-  };
-
-  explicit NetworkMonitor(std::function<void(ConnectionType, bool)> callback) {
-    callback_ = std::move(callback);
-  }
+  // Registers callbacks for connection changes. The callbacks will be called
+  // when device is connected to a LAN network or when the device is connected
+  // to internet.
+  NetworkMonitor(
+      absl::AnyInvocable<void(bool)> lan_connected_callback,
+      absl::AnyInvocable<void(bool)> internet_connected_callback)
+      : lan_connected_callback_(std::move(lan_connected_callback)),
+        internet_connected_callback_(std::move(internet_connected_callback)){}
 
   virtual ~NetworkMonitor() = default;
 
   // Returns true if connected to an AP (Access Point), not necessarily
-  // connected to the internet
+  // connected to the internet.
   virtual bool IsLanConnected() = 0;
 
-  // Returns the type of connection used currently to access the internet
-  virtual ConnectionType GetCurrentConnection() = 0;
+  // Returns true if connected to internet.
+  virtual bool IsInternetConnected() = 0;
 
  protected:
-  std::function<void(ConnectionType, bool)> callback_;
+  absl::AnyInvocable<void(bool)> lan_connected_callback_;
+  absl::AnyInvocable<void(bool)> internet_connected_callback_;
 };
 
 }  // namespace api

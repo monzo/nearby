@@ -26,7 +26,6 @@
 #include "proto/sharing_enums.pb.h"
 #include "sharing/analytics/analytics_device_settings.h"
 #include "sharing/analytics/analytics_information.h"
-#include "sharing/attachment.h"
 #include "sharing/attachment_container.h"
 #include "sharing/common/nearby_share_enums.h"
 #include "sharing/file_attachment.h"
@@ -40,7 +39,6 @@ namespace sharing {
 namespace analytics {
 namespace {
 
-using ::location::nearby::proto::sharing::AttachmentSourceType;
 using ::location::nearby::proto::sharing::DeviceRelationship;
 using ::location::nearby::proto::sharing::DeviceType;
 using ::location::nearby::proto::sharing::EstablishConnectionStatus;
@@ -111,24 +109,6 @@ location::nearby::proto::sharing::DataUsage GetLoggerDataUsage(
   }
 }
 
-AttachmentSourceType GetLoggerAttachmentSourceType(
-    Attachment::SourceType source_type) {
-  switch (source_type) {
-    case Attachment::SourceType::kContextMenu:
-      return AttachmentSourceType::ATTACHMENT_SOURCE_CONTEXT_MENU;
-    case Attachment::SourceType::kDragAndDrop:
-      return AttachmentSourceType::ATTACHMENT_SOURCE_DRAG_AND_DROP;
-    case Attachment::SourceType::kSelectFilesButton:
-      return AttachmentSourceType::ATTACHMENT_SOURCE_SELECT_FILES_BUTTON;
-    case Attachment::SourceType::kPaste:
-      return AttachmentSourceType::ATTACHMENT_SOURCE_PASTE;
-    case Attachment::SourceType::kSelectFoldersButton:
-      return AttachmentSourceType::ATTACHMENT_SOURCE_SELECT_FOLDERS_BUTTON;
-    default:
-      return AttachmentSourceType::ATTACHMENT_SOURCE_UNKNOWN;
-  }
-}
-
 void SetShareTargetInfo(SharingLog::ShareTargetInfo* share_target_info,
                         ShareTargetType device_type,
                         DeviceRelationship relationship,
@@ -186,8 +166,7 @@ void SetAttachmentInfo(SharingLog::AttachmentsInfo* attachments_info,
         attachments_info->mutable_text_attachment()->Add();
     text_attachment->set_type(type);
     text_attachment->set_size_bytes(attachment.size());
-    text_attachment->set_source_type(
-        GetLoggerAttachmentSourceType(attachment.source_type()));
+    text_attachment->set_source_type(attachment.source_type());
     text_attachment->set_batch_id(attachment.batch_id());
   }
 
@@ -222,16 +201,14 @@ void SetAttachmentInfo(SharingLog::AttachmentsInfo* attachments_info,
     file_attachment->set_type(type);
     file_attachment->set_size_bytes(attachment.size());
     file_attachment->set_offset_bytes(0);
-    file_attachment->set_source_type(
-        GetLoggerAttachmentSourceType(attachment.source_type()));
+    file_attachment->set_source_type(attachment.source_type());
     file_attachment->set_batch_id(attachment.batch_id());
   }
 
   for (const auto& attachment : attachments.GetWifiCredentialsAttachments()) {
     SharingLog::WifiCredentialsAttachment* wifi_credentials_attachment =
         attachments_info->mutable_wifi_credentials_attachment()->Add();
-    wifi_credentials_attachment->set_source_type(
-        GetLoggerAttachmentSourceType(attachment.source_type()));
+    wifi_credentials_attachment->set_source_type(attachment.source_type());
     wifi_credentials_attachment->set_batch_id(attachment.batch_id());
   }
 }
@@ -611,7 +588,8 @@ void AnalyticsRecorder::NewSendAttachmentsEnd(
 
 void AnalyticsRecorder::NewSendAttachmentsStart(
     int64_t session_id, const AttachmentContainer& attachments,
-    int transfer_position, int concurrent_connections) {
+    int transfer_position, int concurrent_connections,
+    bool advanced_protection_enabled, bool advanced_protection_mismatch) {
   std::unique_ptr<SharingLog> sharing_log = CreateSharingLog(
       EventCategory::SENDING_EVENT, EventType::SEND_ATTACHMENTS_START);
 
@@ -621,6 +599,10 @@ void AnalyticsRecorder::NewSendAttachmentsStart(
                     attachments);
   send_attachments_start->set_transfer_position(transfer_position);
   send_attachments_start->set_concurrent_connections(concurrent_connections);
+  send_attachments_start->set_advanced_protection_enabled(
+      advanced_protection_enabled);
+  send_attachments_start->set_advanced_protection_mismatch(
+      advanced_protection_mismatch);
 
   LogEvent(*sharing_log);
 }
@@ -704,22 +686,6 @@ void AnalyticsRecorder::NewDeviceSettings(AnalyticsDeviceSettings settings) {
   device_settings->set_is_show_notification_enabled(
       settings.is_fast_init_notification_enabled);
   device_settings->set_visibility(GetLoggerVisibility(settings.visibility));
-
-  LogEvent(*sharing_log);
-}
-
-void AnalyticsRecorder::NewFastShareServerResponse(
-    ::location::nearby::proto::sharing::ServerActionName name,
-    ::location::nearby::proto::sharing::ServerResponseState state,
-    int64_t latency_millis) {
-  std::unique_ptr<SharingLog> sharing_log = CreateSharingLog(
-      EventCategory::SETTINGS_EVENT, EventType::FAST_SHARE_SERVER_RESPONSE);
-
-  auto* fast_share_server_response =
-      sharing_log->mutable_fast_share_server_response();
-  fast_share_server_response->set_name(name);
-  fast_share_server_response->set_status(state);
-  fast_share_server_response->set_latency_millis(latency_millis);
 
   LogEvent(*sharing_log);
 }

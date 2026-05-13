@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+
 licenses(["notice"])
 
 cc_library(
@@ -40,9 +43,9 @@ cc_library(
     copts = [
         "-Ithird_party",
     ],
+    # Flags should not be visible to external users. Only for internal use.
     visibility = [
         "//:__subpackages__",
-        "//googlemac/iPhone/Shared/Identity/SmartSetup:__subpackages__",
         "//location/nearby/cpp:__subpackages__",
         "//location/nearby/sharing/sdk:__subpackages__",
         "//location/nearby/testing:__subpackages__",

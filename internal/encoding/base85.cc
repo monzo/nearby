@@ -67,7 +67,8 @@ std::string Base85Encode(const std::string& input, bool padding) {
   char* result_buffer_end = result.data() + result.size();
 
   size_t bytes = input.size();
-  const char* data = input.data();
+  const unsigned char* data =
+      reinterpret_cast<const unsigned char*>(input.data());
   while (bytes) {
     int count;
     uint32_t value = 0;
@@ -81,6 +82,12 @@ std::string Base85Encode(const std::string& input, bool padding) {
       // special case, use 'z' to encode it
       result_buffer[0] = kBase85Zero;
       ++result_buffer;
+      if (count < 0 || padding) {
+        result_buffer_end -= 4;
+      } else {
+        count = (24 - count) >> 3;
+        result_buffer_end -= (((count % 4) * 5 + 3) >> 2) - 1;
+      }
       continue;
     }
 
@@ -97,12 +104,7 @@ std::string Base85Encode(const std::string& input, bool padding) {
     result_buffer += changed_count;
   }
 
-  if (result_buffer != result_buffer_end) {
-    // special case, may include z encoding
-    return std::string(result.data(), result_buffer - result.data());
-  }
-
-  return result;
+  return std::string(result.data(), result_buffer - result.data());
 }
 
 std::optional<std::string> Base85Decode(const std::string& input) {
@@ -142,6 +144,7 @@ std::optional<std::string> Base85Decode(const std::string& input) {
     int decoded_char;
     uint8_t input_char;
     uint32_t value = 0;
+    bool skip_the_group = false;
     do {
       if (input_buffer < input_buffer_end) {
         input_char = *input_buffer++;
@@ -151,7 +154,8 @@ std::optional<std::string> Base85Decode(const std::string& input) {
             *result_buffer++ = 0x00;
           }
           length -= 4;
-          continue;
+          skip_the_group = true;
+          break;
         }
 
         decoded_char = kBase85DecodeChars[input_char];
@@ -161,6 +165,9 @@ std::optional<std::string> Base85Decode(const std::string& input) {
       }
       value = value * 85 + decoded_char;
     } while (--count);
+    if (skip_the_group) {
+      continue;
+    }
     if (input_buffer < input_buffer_end) {
       input_char = *input_buffer++;
       decoded_char = kBase85DecodeChars[input_char];

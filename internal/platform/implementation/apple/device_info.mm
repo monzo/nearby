@@ -19,16 +19,17 @@
 #import <UIKit/UIKit.h>
 #endif
 
-#include <filesystem>  // NOLINT(build/c++17)
 #include <functional>
 #include <optional>
 #include <string>
 #include <utility>
 
 #include "absl/strings/string_view.h"
+#include "internal/base/file_path.h"
 #include "internal/platform/implementation/device_info.h"
 
-#import "GoogleToolboxForMac/GTMLogger.h"
+#import "internal/platform/implementation/apple/GNCDevicePaths.h"
+#import "internal/platform/implementation/apple/Log/GNCLogger.h"
 
 namespace nearby {
 namespace apple {
@@ -78,7 +79,7 @@ api::DeviceInfo::OsType DeviceInfo::GetOsType() const {
 #endif
 }
 
-std::optional<std::filesystem::path> DeviceInfo::GetDownloadPath() const {
+FilePath DeviceInfo::GetDownloadPath() const {
   NSFileManager *manager = [NSFileManager defaultManager];
 
   NSError *error = nil;
@@ -88,80 +89,23 @@ std::optional<std::filesystem::path> DeviceInfo::GetDownloadPath() const {
                                           create:YES
                                            error:&error];
   if (!downloadsURL) {
-    GTMLoggerError(@"Failed to get download path: %@", error);
-    return std::nullopt;
+    GNCLoggerError(@"Failed to get download path: %@", error);
+    return GetTemporaryPath();
   }
 
-  return std::filesystem::path([downloadsURL.path cString]);
+  return FilePath(absl::string_view([downloadsURL.path cString]));
 }
 
-std::optional<std::filesystem::path> DeviceInfo::GetLocalAppDataPath() const {
-  NSFileManager *manager = [NSFileManager defaultManager];
-
-  NSError *error = nil;
-  NSURL *applicationSupportURL = [manager URLForDirectory:NSApplicationSupportDirectory
-                                                 inDomain:NSUserDomainMask
-                                        appropriateForURL:nil
-                                                   create:YES
-                                                    error:&error];
-  if (!applicationSupportURL) {
-    GTMLoggerError(@"Failed to get application support path: %@", error);
-    return std::nullopt;
-  }
-
-  return std::filesystem::path([applicationSupportURL.path cString]);
+FilePath DeviceInfo::GetLocalAppDataPath(FilePath sub_path) const {
+  return FilePath(absl::string_view([GNCLocalAppDataPath().path cString])).append(sub_path);
 }
 
-std::optional<std::filesystem::path> DeviceInfo::GetCommonAppDataPath() const {
-  return GetLocalAppDataPath();
+FilePath DeviceInfo::GetTemporaryPath() const {
+  return FilePath(absl::string_view([NSTemporaryDirectory() cString]));
 }
 
-std::optional<std::filesystem::path> DeviceInfo::GetTemporaryPath() const {
-  return std::filesystem::path([NSTemporaryDirectory() cString]);
-}
-
-std::optional<std::filesystem::path> DeviceInfo::GetLogPath() const {
-  NSFileManager *manager = [NSFileManager defaultManager];
-
-  NSError *error = nil;
-  NSURL *applicationSupportURL = [manager URLForDirectory:NSApplicationSupportDirectory
-                                                 inDomain:NSUserDomainMask
-                                        appropriateForURL:nil
-                                                   create:YES
-                                                    error:&error];
-  if (!applicationSupportURL) {
-    GTMLoggerError(@"Failed to get application support path: %@", error);
-    return std::nullopt;
-  }
-
-  // TODO(b/276937308): This should not hard-code Nearby Share's log directory, but this matches the
-  // current Windows implmementation.
-  NSURL *logsURL =
-      [applicationSupportURL URLByAppendingPathComponent:@"Google/Nearby/Sharing/Logs"];
-
-  return std::filesystem::path([logsURL.path cString]);
-}
-
-std::optional<std::filesystem::path> DeviceInfo::GetCrashDumpPath() const {
-  NSFileManager *manager = [NSFileManager defaultManager];
-
-  NSError *error = nil;
-  NSURL *applicationSupportURL = [manager URLForDirectory:NSApplicationSupportDirectory
-                                                 inDomain:NSUserDomainMask
-                                        appropriateForURL:nil
-                                                   create:YES
-                                                    error:&error];
-  if (!applicationSupportURL) {
-    GTMLoggerError(@"Failed to get application support path: %@", error);
-    return std::nullopt;
-  }
-
-  // TODO(b/276937308): This should not hard-code Nearby Share's crash dump directory, but this
-  // matches the current Windows implmementation.
-  NSURL *crashDumpsURL =
-      [applicationSupportURL URLByAppendingPathComponent:@"Google/Nearby/Sharing/CrashDumps"];
-
-  return std::filesystem::path([crashDumpsURL.path cString]);
+FilePath DeviceInfo::GetLogPath() const {
+  return FilePath(absl::string_view([GNCLogPath().path cString]));
 }
 
 bool DeviceInfo::IsScreenLocked() const { return false; }

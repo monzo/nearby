@@ -29,9 +29,8 @@
 #include "absl/synchronization/notification.h"
 #include "absl/types/optional.h"
 #include "internal/platform/byte_array.h"
-#include "internal/platform/implementation/ble_v2.h"
+#include "internal/platform/implementation/ble.h"
 #include "internal/platform/implementation/bluetooth_adapter.h"
-#include "internal/platform/implementation/windows/ble_v2_peripheral.h"
 #include "internal/platform/implementation/windows/bluetooth_adapter.h"
 #include "internal/platform/uuid.h"
 #include "winrt/Windows.Devices.Bluetooth.GenericAttributeProfile.h"
@@ -42,24 +41,24 @@
 namespace nearby {
 namespace windows {
 
-class BleGattServer : public api::ble_v2::GattServer {
+class BleGattServer : public api::ble::GattServer {
  public:
   // Make sure the adapter parameter is not null.
   BleGattServer(api::BluetoothAdapter* adapter,
-                api::ble_v2::ServerGattConnectionCallback callback);
+                api::ble::ServerGattConnectionCallback callback);
   ~BleGattServer() override = default;
-  absl::optional<api::ble_v2::GattCharacteristic> CreateCharacteristic(
+  absl::optional<api::ble::GattCharacteristic> CreateCharacteristic(
       const Uuid& service_uuid, const Uuid& characteristic_uuid,
-      api::ble_v2::GattCharacteristic::Permission permission,
-      api::ble_v2::GattCharacteristic::Property property) override
+      api::ble::GattCharacteristic::Permission permission,
+      api::ble::GattCharacteristic::Property property) override
       ABSL_LOCKS_EXCLUDED(mutex_);
 
-  bool UpdateCharacteristic(
-      const api::ble_v2::GattCharacteristic& characteristic,
-      const nearby::ByteArray& value) override ABSL_LOCKS_EXCLUDED(mutex_);
+  bool UpdateCharacteristic(const api::ble::GattCharacteristic& characteristic,
+                            const nearby::ByteArray& value) override
+      ABSL_LOCKS_EXCLUDED(mutex_);
 
   absl::Status NotifyCharacteristicChanged(
-      const api::ble_v2::GattCharacteristic& characteristic, bool confirm,
+      const api::ble::GattCharacteristic& characteristic, bool confirm,
       const ByteArray& new_value) override ABSL_LOCKS_EXCLUDED(mutex_);
 
   void Stop() override ABSL_LOCKS_EXCLUDED(mutex_);
@@ -71,14 +70,10 @@ class BleGattServer : public api::ble_v2::GattServer {
   void SetCloseNotifier(absl::AnyInvocable<void()> notifier)
       ABSL_LOCKS_EXCLUDED(mutex_);
 
-  api::ble_v2::BlePeripheral& GetBlePeripheral() override {
-    return peripheral_;
-  }
-
  private:
   // Used to save native data related to the GATT characteristic.
   struct GattCharacteristicData {
-    api::ble_v2::GattCharacteristic gatt_characteristic;
+    api::ble::GattCharacteristic gatt_characteristic;
     ByteArray data;
     ::winrt::Windows::Devices::Bluetooth::GenericAttributeProfile::
         GattLocalCharacteristic local_characteristic = nullptr;
@@ -93,7 +88,7 @@ class BleGattServer : public api::ble_v2::GattServer {
 
   bool InitializeGattServer() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   void NotifyValueChanged(
-      const api::ble_v2::GattCharacteristic& gatt_characteristic)
+      const api::ble::GattCharacteristic& gatt_characteristic)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   GattCharacteristicData* FindGattCharacteristicData(
@@ -101,7 +96,7 @@ class BleGattServer : public api::ble_v2::GattServer {
           GattLocalCharacteristic& gatt_local_characteristic)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   GattCharacteristicData* FindGattCharacteristicData(
-      const api::ble_v2::GattCharacteristic& gatt_characteristic)
+      const api::ble::GattCharacteristic& gatt_characteristic)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   ::winrt::fire_and_forget Characteristic_ReadRequestedAsync(
@@ -132,8 +127,7 @@ class BleGattServer : public api::ble_v2::GattServer {
   absl::Mutex mutex_;
 
   BluetoothAdapter* const adapter_ = nullptr;
-  BleV2Peripheral peripheral_;
-  api::ble_v2::ServerGattConnectionCallback gatt_connection_callback_{};
+  api::ble::ServerGattConnectionCallback gatt_connection_callback_{};
 
   ::winrt::Windows::Devices::Bluetooth::GenericAttributeProfile::
       GattServiceProvider gatt_service_provider_ ABSL_GUARDED_BY(mutex_) =

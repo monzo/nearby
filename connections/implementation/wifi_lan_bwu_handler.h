@@ -17,7 +17,6 @@
 
 #include <memory>
 #include <string>
-#include <utility>
 
 #include "connections/implementation/base_bwu_handler.h"
 #include "connections/implementation/bwu_handler.h"
@@ -25,7 +24,6 @@
 #include "connections/implementation/endpoint_channel.h"
 #include "connections/implementation/mediums/mediums.h"
 #include "connections/implementation/mediums/wifi_lan.h"
-#include "internal/platform/byte_array.h"
 #include "internal/platform/expected.h"
 #include "internal/platform/wifi_lan.h"
 
@@ -39,6 +37,19 @@ class WifiLanBwuHandler : public BaseBwuHandler {
   explicit WifiLanBwuHandler(
       Mediums& mediums,
       IncomingConnectionCallback incoming_connection_callback);
+
+  // BwuHandler implementation:
+  ErrorOr<std::unique_ptr<EndpointChannel>> CreateUpgradedEndpointChannel(
+      ClientProxy* client, const std::string& service_id,
+      const std::string& endpoint_id,
+      const location::nearby::connections::BandwidthUpgradeNegotiationFrame::
+          UpgradePathInfo& upgrade_path_info) override;
+  location::nearby::proto::connections::Medium GetUpgradeMedium()
+      const override {
+    return location::nearby::proto::connections::Medium::WIFI_LAN;
+  }
+  void OnEndpointDisconnect(ClientProxy* client,
+                            const std::string& endpoint_id) override {}
 
  private:
   class WifiLanIncomingSocket : public BwuHandler::IncomingSocket {
@@ -55,20 +66,8 @@ class WifiLanBwuHandler : public BaseBwuHandler {
     WifiLanSocket socket_;
   };
 
-  // BwuHandler implementation:
-  ErrorOr<std::unique_ptr<EndpointChannel>>
-  CreateUpgradedEndpointChannel(ClientProxy* client,
-                                const std::string& service_id,
-                                const std::string& endpoint_id,
-                                const UpgradePathInfo& upgrade_path_info) final;
-  location::nearby::proto::connections::Medium GetUpgradeMedium() const final {
-    return location::nearby::proto::connections::Medium::WIFI_LAN;
-  }
-  void OnEndpointDisconnect(ClientProxy* client,
-                            const std::string& endpoint_id) final {}
-
   // BaseBwuHandler implementation:
-  ByteArray HandleInitializeUpgradedMediumForEndpoint(
+  std::string HandleInitializeUpgradedMediumForEndpoint(
       ClientProxy* client, const std::string& upgrade_service_id,
       const std::string& endpoint_id) final;
   void HandleRevertInitiatorStateForService(

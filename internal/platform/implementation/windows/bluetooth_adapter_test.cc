@@ -77,16 +77,6 @@ TEST(BluetoothAdapter, DISABLED_SetNameWithEmptyStringSetsOriginalName) {
   EXPECT_EQ(bluetooth_adapter.GetName(), original_name);
 }
 
-TEST(BluetoothAdapter, DISABLED_SetNameWithNullPtrSetsOriginalName) {
-  BluetoothAdapter bluetooth_adapter;
-  auto original_name = bluetooth_adapter.GetName();
-
-  bluetooth_adapter.SetName(nullptr,
-                            /* persist= */ false);
-
-  EXPECT_EQ(bluetooth_adapter.GetName(), original_name);
-}
-
 TEST(BluetoothAdapter, DISABLED_SetStatus) {
   BluetoothAdapter bluetooth_adapter;
   EXPECT_TRUE(
@@ -156,7 +146,7 @@ TEST(BluetoothAdapter, DISABLED_SetName_Exceeded) {
 
 TEST(BluetoothAdapter, DISABLED_GetMacAddress) {
   BluetoothAdapter bluetooth_adapter;
-  EXPECT_TRUE(!bluetooth_adapter.GetMacAddress().empty());
+  EXPECT_TRUE(bluetooth_adapter.GetMacAddress().IsSet());
 }
 
 TEST(BluetoothAdapter, DISABLED_SetOnScanModeChanged) {

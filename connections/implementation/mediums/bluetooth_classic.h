@@ -22,14 +22,12 @@
 #include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/functional/any_invocable.h"
-#include "connections/implementation/flags/nearby_connections_feature_flags.h"
 #include "connections/implementation/mediums/bluetooth_radio.h"
-#include "connections/implementation/mediums/multiplex/multiplex_socket.h"
-#include "internal/flags/nearby_flags.h"
 #include "internal/platform/bluetooth_adapter.h"
 #include "internal/platform/bluetooth_classic.h"
 #include "internal/platform/cancellation_flag.h"
 #include "internal/platform/expected.h"
+#include "internal/platform/mac_address.h"
 #include "internal/platform/multi_thread_executor.h"
 #include "internal/platform/mutex.h"
 
@@ -120,9 +118,9 @@ class BluetoothClassic {
                                    CancellationFlag* cancellation_flag)
       ABSL_LOCKS_EXCLUDED(mutex_);
 
-  std::string GetMacAddress() const ABSL_LOCKS_EXCLUDED(mutex_);
+  MacAddress GetAddress() const ABSL_LOCKS_EXCLUDED(mutex_);
 
-  BluetoothDevice GetRemoteDevice(const std::string& mac_address)
+  BluetoothDevice GetRemoteDevice(MacAddress mac_address)
       ABSL_LOCKS_EXCLUDED(mutex_);
 
   bool IsDiscovering(const std::string& serviceId) const
@@ -233,14 +231,6 @@ class BluetoothClassic {
   mutable Mutex discovery_callbacks_mutex_;
   absl::flat_hash_map<std::string, DiscoveredDeviceCallback>
       discovery_callbacks_ ABSL_GUARDED_BY(discovery_callbacks_mutex_);
-
-  // Whether the multiplex feature is enabled.
-  bool is_multiplex_enabled_ = NearbyFlags::GetInstance().GetBoolFlag(
-      config_package_nearby::nearby_connections_feature::kEnableMultiplex);
-
-  // A map of Bluetooth MacAddress -> MultiplexSocket.
-  absl::flat_hash_map<std::string, mediums::multiplex::MultiplexSocket*>
-      multiplex_sockets_ ABSL_GUARDED_BY(mutex_);
 };
 
 }  // namespace connections

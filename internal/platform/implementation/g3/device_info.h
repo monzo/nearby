@@ -15,8 +15,6 @@
 #ifndef PLATFORM_IMPL_G3_DEVICE_INFO_H_
 #define PLATFORM_IMPL_G3_DEVICE_INFO_H_
 
-#include <cstdlib>
-#include <filesystem>  // NOLINT
 #include <functional>
 #include <optional>
 #include <string>
@@ -24,7 +22,11 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/string_view.h"
+#include "internal/base/file_path.h"
+#include "internal/base/files.h"
 #include "internal/platform/implementation/device_info.h"
+#include "internal/platform/implementation/g3/linux_path_util.h"
+#include "internal/platform/medium_environment.h"
 
 namespace nearby {
 namespace g3 {
@@ -43,33 +45,25 @@ class DeviceInfo : public api::DeviceInfo {
     return api::DeviceInfo::OsType::kChromeOs;
   }
 
-  std::optional<std::filesystem::path> GetDownloadPath() const override {
-    return std::filesystem::temp_directory_path();
+  FilePath GetDownloadPath() const override {
+    return Files::GetTemporaryDirectory();
   }
 
-  std::optional<std::filesystem::path> GetLocalAppDataPath() const override {
-    const char* home_dir = getenv("HOME");
-    if (home_dir == nullptr) {
-      return std::filesystem::temp_directory_path();
+  FilePath GetLocalAppDataPath(FilePath sub_path) const override {
+    if (MediumEnvironment::Instance()
+            .GetEnvironmentConfig()
+            .use_temporary_directory_for_app_path) {
+      return Files::GetTemporaryDirectory().append(sub_path);
     }
-    // Yhis matches the .NET LocalAppData directory on Linux.
-    return std::filesystem::path(home_dir).append(".local").append("share");
+    return GetAppDataPath().append(sub_path);
   }
 
-  std::optional<std::filesystem::path> GetCommonAppDataPath() const override {
-    return std::filesystem::temp_directory_path();
+  FilePath GetTemporaryPath() const override {
+    return Files::GetTemporaryDirectory();
   }
 
-  std::optional<std::filesystem::path> GetTemporaryPath() const override {
-    return std::filesystem::temp_directory_path();
-  }
-
-  std::optional<std::filesystem::path> GetLogPath() const override {
-    return std::filesystem::temp_directory_path();
-  }
-
-  std::optional<std::filesystem::path> GetCrashDumpPath() const override {
-    return std::filesystem::temp_directory_path();
+  FilePath GetLogPath() const override {
+    return Files::GetTemporaryDirectory();
   }
 
   bool IsScreenLocked() const override { return false; }

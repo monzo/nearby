@@ -14,6 +14,7 @@
 
 #include "connections/implementation/ble_advertisement.h"
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <utility>
@@ -21,11 +22,13 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
-#include "connections/implementation/base_pcp_handler.h"
+#include "absl/types/span.h"
 #include "connections/implementation/pcp.h"
+#include "connections/implementation/webrtc_state.h"
 #include "internal/platform/bluetooth_utils.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/logging.h"
+#include "internal/platform/mac_address.h"
 #include "internal/platform/stream_reader.h"
 
 namespace nearby {
@@ -35,7 +38,7 @@ BleAdvertisement::BleAdvertisement(Version version, Pcp pcp,
                                    const ByteArray& service_id_hash,
                                    const std::string& endpoint_id,
                                    const ByteArray& endpoint_info,
-                                   const std::string& bluetooth_mac_address,
+                                   MacAddress bluetooth_mac_address,
                                    const ByteArray& uwb_address,
                                    WebRtcState web_rtc_state) {
   DoInitialize(/*fast_advertisement=*/false, version, pcp, service_id_hash,
@@ -55,7 +58,7 @@ void BleAdvertisement::DoInitialize(bool fast_advertisement, Version version,
                                     Pcp pcp, const ByteArray& service_id_hash,
                                     const std::string& endpoint_id,
                                     const ByteArray& endpoint_info,
-                                    const std::string& bluetooth_mac_address,
+                                    MacAddress bluetooth_mac_address,
                                     const ByteArray& uwb_address,
                                     WebRtcState web_rtc_state) {
   fast_advertisement_ = fast_advertisement;
@@ -86,7 +89,7 @@ void BleAdvertisement::DoInitialize(bool fast_advertisement, Version version,
   endpoint_info_ = endpoint_info;
   uwb_address_ = uwb_address;
   if (!fast_advertisement_) {
-    if (!BluetoothUtils::FromString(bluetooth_mac_address).Empty()) {
+    if (bluetooth_mac_address.IsSet()) {
       bluetooth_mac_address_ = bluetooth_mac_address;
     }
 
@@ -113,7 +116,7 @@ absl::StatusOr<BleAdvertisement> BleAdvertisement::CreateBleAdvertisement(
   }
 
   ByteArray advertisement_bytes{ble_advertisement_bytes};
-  StreamReader stream_reader{advertisement_bytes};
+  StreamReader stream_reader{&advertisement_bytes};
   // The first 1 byte is supposed to be the version and pcp.
   auto version_and_pcp_byte = stream_reader.ReadUint8();
   if (!version_and_pcp_byte.has_value()) {
@@ -193,7 +196,7 @@ absl::StatusOr<BleAdvertisement> BleAdvertisement::CreateBleAdvertisement(
   }
 
   // The next 6 bytes are the bluetooth mac address if not fast advertisement.
-  std::string bluetooth_mac_address;
+  MacAddress mac_address;
   if (!fast_advertisement) {
     auto bluetooth_mac_address_bytes =
         stream_reader.ReadBytes(BluetoothUtils::kBluetoothMacAddressLength);
@@ -201,8 +204,11 @@ absl::StatusOr<BleAdvertisement> BleAdvertisement::CreateBleAdvertisement(
       return absl::InvalidArgumentError(
           "Cannot deserialize BleAdvertisement: bluetooth_mac_address.");
     }
-    bluetooth_mac_address =
-        BluetoothUtils::ToString(*bluetooth_mac_address_bytes);
+    MacAddress::FromBytes(
+        absl::MakeSpan(reinterpret_cast<const uint8_t*>(
+                           bluetooth_mac_address_bytes->data()),
+                       bluetooth_mac_address_bytes->size()),
+        mac_address);
   }
 
   // The next 1 byte is supposed to be the length of the uwb_address. If the
@@ -250,7 +256,7 @@ absl::StatusOr<BleAdvertisement> BleAdvertisement::CreateBleAdvertisement(
   ble_advertisement.service_id_hash_ = service_id_hash;
   ble_advertisement.endpoint_id_ = endpoint_id;
   ble_advertisement.endpoint_info_ = endpoint_info;
-  ble_advertisement.bluetooth_mac_address_ = bluetooth_mac_address;
+  ble_advertisement.bluetooth_mac_address_ = mac_address;
   ble_advertisement.uwb_address_ = uwb_address;
   return ble_advertisement;
 }
@@ -285,10 +291,13 @@ BleAdvertisement::operator ByteArray() const {
 
     // The next 6 bytes are the bluetooth mac address. If bluetooth_mac_address
     // is invalid or empty, we get back an empty byte array.
-    auto bluetooth_mac_address_bytes{
-        BluetoothUtils::FromString(bluetooth_mac_address_)};
-    if (!bluetooth_mac_address_bytes.Empty()) {
-      absl::StrAppend(&out, std::string(bluetooth_mac_address_bytes));
+    if (bluetooth_mac_address_.IsSet()) {
+      ByteArray bluetooth_mac_address_bytes(
+          BluetoothUtils::kBluetoothMacAddressLength);
+      bluetooth_mac_address_.ToBytes(absl::MakeSpan(
+          reinterpret_cast<uint8_t*>(bluetooth_mac_address_bytes.data()),
+          bluetooth_mac_address_bytes.size()));
+       absl::StrAppend(&out, std::string(bluetooth_mac_address_bytes));
     } else {
       // If bluetooth MAC address is invalid, then reserve the bytes.
       auto fake_bt_mac_address_bytes =

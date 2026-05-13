@@ -49,13 +49,13 @@ class WebRtcSignalingMessenger {
 class WebRtcMedium {
  public:
   using PeerConnectionCallback = absl::AnyInvocable<void(
-      rtc::scoped_refptr<webrtc::PeerConnectionInterface>)>;
+      webrtc::scoped_refptr<webrtc::PeerConnectionInterface>)>;
 
   virtual ~WebRtcMedium() = default;
 
   // Gets the default two-letter country code associated with current locale.
   // For example, en_US locale resolves to "US".
-  virtual const std::string GetDefaultCountryCode() = 0;
+  virtual std::string GetDefaultCountryCode() = 0;
 
   // Creates and returns a new webrtc::PeerConnectionInterface object via
   // |callback|.

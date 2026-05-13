@@ -19,13 +19,14 @@
 #include <optional>
 #include <string>
 
+#include "absl/base/attributes.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
-#include "internal/platform/byte_array.h"
 #include "internal/platform/cancellation_flag.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/input_stream.h"
 #include "internal/platform/listeners.h"
+#include "internal/platform/mac_address.h"
 #include "internal/platform/output_stream.h"
 
 namespace nearby {
@@ -39,8 +40,7 @@ class BluetoothDevice {
   // https://developer.android.com/reference/android/bluetooth/BluetoothDevice.html#getName()
   virtual std::string GetName() const = 0;
 
-  // Returns BT MAC address assigned to this device.
-  virtual std::string GetMacAddress() const = 0;
+  virtual MacAddress GetMacAddress() const = 0;
 };
 
 // https://developer.android.com/reference/android/bluetooth/BluetoothSocket.html.
@@ -284,7 +284,7 @@ class BluetoothClassicMedium {
   virtual std::unique_ptr<BluetoothPairing> CreatePairing(
       BluetoothDevice& remote_device) = 0;
 
-  virtual BluetoothDevice* GetRemoteDevice(const std::string& mac_address) = 0;
+  virtual BluetoothDevice* GetRemoteDevice(MacAddress mac_address) = 0;
 
   virtual void AddObserver(Observer* observer) = 0;
   virtual void RemoveObserver(Observer* observer) = 0;

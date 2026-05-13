@@ -21,6 +21,9 @@
 #include <utility>
 
 #include "absl/strings/str_cat.h"
+#include "absl/strings/string_view.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "connections/implementation/internal_payload.h"
 #include "connections/implementation/proto/offline_wire_formats.pb.h"
 #include "connections/payload.h"
@@ -42,6 +45,17 @@ namespace connections {
 namespace {
 using ::location::nearby::connections::PayloadTransferFrame;
 using ::location::nearby::proto::connections::OperationResultCode;
+
+// if custom_save_path is empty, default download path is used
+std::string make_path(const std::string& custom_save_path,
+                      const std::string& parent_folder,
+                      const std::string& file_name) {
+  if (!custom_save_path.empty()) {
+    std::string path = absl::StrCat(custom_save_path, "/", parent_folder);
+    return api::ImplementationPlatform::GetCustomSavePath(path, file_name);
+  }
+  return api::ImplementationPlatform::GetDownloadPath(parent_folder, file_name);
+}
 
 class BytesInternalPayload : public InternalPayload {
  public:
@@ -71,7 +85,7 @@ class BytesInternalPayload : public InternalPayload {
   }
 
   // Does nothing.
-  Exception AttachNextChunk(const ByteArray& chunk) override {
+  Exception AttachNextChunk(absl::string_view chunk) override {
     return {Exception::kSuccess};
   }
 
@@ -125,7 +139,7 @@ class OutgoingStreamInternalPayload : public InternalPayload {
     return scoped_bytes_read;
   }
 
-  Exception AttachNextChunk(const ByteArray& chunk) override {
+  Exception AttachNextChunk(absl::string_view chunk) override {
     return {Exception::kIo};
   }
 
@@ -169,8 +183,8 @@ class IncomingStreamInternalPayload : public InternalPayload {
 
   ByteArray DetachNextChunk(int chunk_size) override { return {}; }
 
-  Exception AttachNextChunk(const ByteArray& chunk) override {
-    if (chunk.Empty()) {
+  Exception AttachNextChunk(absl::string_view chunk) override {
+    if (chunk.empty()) {
       LOG(INFO) << "Received null last chunk for incoming payload " << this
                 << ", closing OutputStream.";
       Close();
@@ -227,7 +241,7 @@ class OutgoingFileInternalPayload : public InternalPayload {
     return bytes;
   }
 
-  Exception AttachNextChunk(const ByteArray& chunk) override {
+  Exception AttachNextChunk(absl::string_view chunk) override {
     return {Exception::kIo};
   }
 
@@ -265,9 +279,11 @@ class OutgoingFileInternalPayload : public InternalPayload {
 class IncomingFileInternalPayload : public InternalPayload {
  public:
   IncomingFileInternalPayload(Payload payload, OutputFile output_file,
+                              absl::Time last_modified_time,
                               std::int64_t total_size)
       : InternalPayload(std::move(payload)),
         output_file_(std::move(output_file)),
+        last_modified_time_(last_modified_time),
         total_size_(total_size) {}
 
   location::nearby::connections::PayloadTransferFrame::PayloadHeader::
@@ -281,10 +297,10 @@ class IncomingFileInternalPayload : public InternalPayload {
 
   ByteArray DetachNextChunk(int chunk_size) override { return {}; }
 
-  Exception AttachNextChunk(const ByteArray& chunk) override {
-    if (chunk.Empty()) {
+  Exception AttachNextChunk(absl::string_view chunk) override {
+    if (chunk.empty()) {
       // Received null last chunk for incoming payload.
-      output_file_.Close();
+      Close();
       return {Exception::kSuccess};
     }
 
@@ -296,10 +312,14 @@ class IncomingFileInternalPayload : public InternalPayload {
     return {Exception::kIo};
   }
 
-  void Close() override { output_file_.Close(); }
+  void Close() override {
+    output_file_.SetLastModifiedTime(last_modified_time_);
+    output_file_.Close();
+  }
 
  private:
   OutputFile output_file_;
+  absl::Time last_modified_time_;
   const std::int64_t total_size_;
 };
 
@@ -327,27 +347,6 @@ ErrorOr<std::unique_ptr<InternalPayload>> CreateOutgoingInternalPayload(
       DCHECK(false);  // This should never happen.
       return {Error(OperationResultCode::DETAIL_UNKNOWN)};
   }
-}
-
-// if custom_save_path is empty, default download path is used
-std::string make_path(const std::string& custom_save_path,
-                      std::string& parent_folder, std::string& file_name) {
-  if (!custom_save_path.empty()) {
-    std::string path = absl::StrCat(custom_save_path, "/", parent_folder);
-    return api::ImplementationPlatform::GetCustomSavePath(path, file_name);
-  }
-  return api::ImplementationPlatform::GetDownloadPath(parent_folder, file_name);
-}
-
-// if custom_save_path is empty, default download path is used
-std::string make_path(const std::string& custom_save_path,
-                      std::string& parent_folder, int64_t id) {
-  std::string file_name(std::to_string(id));
-  if (!custom_save_path.empty()) {
-    std::string path = absl::StrCat(custom_save_path, "/", parent_folder);
-    return api::ImplementationPlatform::GetCustomSavePath(path, file_name);
-  }
-  return api::ImplementationPlatform::GetDownloadPath(parent_folder, file_name);
 }
 
 ErrorOr<std::unique_ptr<InternalPayload>> CreateIncomingInternalPayload(
@@ -405,6 +404,13 @@ ErrorOr<std::unique_ptr<InternalPayload>> CreateIncomingInternalPayload(
       if (frame.payload_header().has_total_size()) {
         total_size = frame.payload_header().total_size();
       }
+      absl::Time last_modified_time = absl::Now();
+      if (frame.payload_header().has_last_modified_timestamp_millis()) {
+        last_modified_time = absl::FromUnixMillis(
+            frame.payload_header().last_modified_timestamp_millis());
+        VLOG(1) << "Received last modified time: " << last_modified_time
+                << " for file: " << file_name;
+      }
 
       // These are ordered, the output file must be created first otherwise
       // there will be no input file to open.
@@ -416,8 +422,8 @@ ErrorOr<std::unique_ptr<InternalPayload>> CreateIncomingInternalPayload(
           return {Error(OperationResultCode::IO_FILE_OPENING_ERROR)};
         }
         return {std::make_unique<IncomingFileInternalPayload>(
-            Payload(payload_id, InputFile(payload_id, total_size)),
-            std::move(output_file), total_size)};
+            Payload(payload_id, InputFile(payload_id)),
+            std::move(output_file), last_modified_time, total_size)};
       } else {
         OutputFile output_file(file_path);
         if (!output_file.IsValid()) {
@@ -426,8 +432,8 @@ ErrorOr<std::unique_ptr<InternalPayload>> CreateIncomingInternalPayload(
         }
         return {std::make_unique<IncomingFileInternalPayload>(
             Payload(payload_id, parent_folder, file_name,
-                    InputFile(file_path, total_size)),
-            std::move(output_file), total_size)};
+                    InputFile(file_path)),
+            std::move(output_file), last_modified_time, total_size)};
       }
     }
     default:

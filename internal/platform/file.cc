@@ -13,13 +13,18 @@
 // limitations under the License.
 
 #include "internal/platform/file.h"
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include "absl/strings/string_view.h"
+#include "absl/time/time.h"
+#include "internal/platform/payload_id.h"
 
 namespace nearby {
 
-InputFile::InputFile(PayloadId id, std::int64_t size)
-    : impl_(Platform::CreateInputFile(id, size)) {}
-InputFile::InputFile(std::string file_path, std::int64_t size)
-    : impl_(Platform::CreateInputFile(file_path, size)) {}
+InputFile::InputFile(PayloadId id) : impl_(Platform::CreateInputFile(id)) {}
+InputFile::InputFile(std::string file_path)
+    : impl_(Platform::CreateInputFile(file_path)) {}
 InputFile::~InputFile() = default;
 InputFile::InputFile(InputFile&& other) noexcept = default;
 InputFile& InputFile::operator=(InputFile&& other) = default;
@@ -36,6 +41,10 @@ std::string InputFile::GetFilePath() const { return impl_->GetFilePath(); }
 
 // Returns total size of this file in bytes.
 std::int64_t InputFile::GetTotalSize() const { return impl_->GetTotalSize(); }
+
+absl::Time InputFile::GetLastModifiedTime() const {
+  return impl_->GetLastModifiedTime();
+}
 
 ExceptionOr<size_t> InputFile::Skip(size_t offset) {
   return impl_->Skip(offset);
@@ -62,15 +71,11 @@ OutputFile::OutputFile(OutputFile&&) noexcept = default;
 OutputFile& OutputFile::operator=(OutputFile&&) = default;
 
 bool OutputFile::IsValid() const { return impl_ != nullptr; }
-// Writes all data from ByteArray object to the underlying stream.
+// Writes all data from absl::string_view to the underlying stream.
 // Returns Exception::kIo on error, Exception::kSuccess otherwise.
-Exception OutputFile::Write(const ByteArray& data) {
+Exception OutputFile::Write(absl::string_view data) {
   return impl_->Write(data);
 }
-
-// Ensures that all data written by previous calls to Write() is passed
-// down to the applicable transport layer.
-Exception OutputFile::Flush() { return impl_->Flush(); }
 
 // Disallows further writes to the file and frees system resources,
 // associated with it.
@@ -84,5 +89,9 @@ Exception OutputFile::Close() { return impl_->Close(); }
 // Write, or Close will be observable through OutputStream& handle, and vice
 // versa.
 OutputStream& OutputFile::GetOutputStream() { return *impl_; }
+
+void OutputFile::SetLastModifiedTime(absl::Time last_modified_time) {
+  impl_->SetLastModifiedTime(last_modified_time);
+}
 
 }  // namespace nearby

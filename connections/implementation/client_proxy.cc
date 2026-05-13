@@ -28,6 +28,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/functional/any_invocable.h"
+#include "absl/random/random.h"
 #include "absl/strings/escaping.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
@@ -39,6 +40,7 @@
 #include "connections/implementation/analytics/analytics_recorder.h"
 #include "connections/implementation/analytics/discovery_metadata_params.h"
 #include "connections/implementation/flags/nearby_connections_feature_flags.h"
+#include "connections/implementation/mediums/advertisements/dct_advertisement.h"
 #include "connections/listeners.h"
 #include "connections/medium_selector.h"
 #include "connections/payload.h"
@@ -51,26 +53,34 @@
 #include "connections/v3/connections_device_provider.h"
 #include "connections/v3/listeners.h"
 #include "internal/analytics/event_logger.h"
+#include "internal/base/file_path.h"
+#include "internal/base/files.h"
 #include "internal/flags/nearby_flags.h"
 #include "internal/interop/device.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/cancelable_alarm.h"
 #include "internal/platform/cancellation_flag.h"
+#ifndef NEARBY_CHROMIUM
+#include "internal/platform/implementation/device_info.h"
+#endif
 #include "internal/platform/error_code_params.h"
 #include "internal/platform/error_code_recorder.h"
 #include "internal/platform/feature_flags.h"
+#include "internal/platform/implementation/app_lifecycle_monitor.h"
 #include "internal/platform/implementation/platform.h"
+#include "internal/platform/implementation/system_clock.h"
 #include "internal/platform/logging.h"
+#include "internal/platform/mac_address.h"
 #include "internal/platform/mutex_lock.h"
 #include "internal/platform/os_name.h"
 #include "internal/platform/prng.h"
 #include "proto/connections_enums.pb.h"
 
-namespace nearby {
-namespace connections {
+namespace nearby::connections {
 
 namespace {
 using ::location::nearby::analytics::proto::ConnectionsLog;
+using ::location::nearby::connections::MediumRole;
 using ::location::nearby::connections::OsInfo;
 
 constexpr char kEndpointIdChars[] = {
@@ -78,16 +88,28 @@ constexpr char kEndpointIdChars[] = {
     'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X',
     'Y', 'Z', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0'};
 
-bool IsFeatureUseStableEndpointIdEnabled() {
-  return NearbyFlags::GetInstance().GetBoolFlag(
-      connections::config_package_nearby::nearby_connections_feature::
-          kUseStableEndpointId);
-}
+constexpr absl::string_view kPreferencesFilePath = "Google/Nearby/Connections";
+
+constexpr absl::string_view kAdvertisingEndpointId =
+    "nc.advertising.endpoint_id";
+
+constexpr absl::string_view kAdvertisingTimestamp = "nc.advertising.timestamp";
+
+constexpr absl::Duration kAdvertisingKeepAliveDuration = absl::Seconds(30);
+
 }  // namespace
 
 ClientProxy::ClientProxy(::nearby::analytics::EventLogger* event_logger)
     : client_id_(Prng().NextInt64()) {
-  NEARBY_LOGS(INFO) << "ClientProxy ctor event_logger=" << event_logger;
+  VLOG(1) << "ClientProxy ctor event_logger=" << event_logger;
+  if (NearbyFlags::GetInstance().GetBoolFlag(
+          config_package_nearby::nearby_connections_feature::
+              kEnableNearbyConnectionsPreferences)) {
+    InitializePreferencesManager();
+  }
+
+  is_dct_enabled_ = NearbyFlags::GetInstance().GetBoolFlag(
+      config_package_nearby::nearby_connections_feature::kEnableDct);
   analytics_recorder_ =
       std::make_unique<analytics::AnalyticsRecorder>(event_logger);
   error_code_recorder_ = std::make_unique<ErrorCodeRecorder>(
@@ -99,14 +121,30 @@ ClientProxy::ClientProxy(::nearby::analytics::EventLogger* event_logger)
   supports_safe_to_disconnect_ = NearbyFlags::GetInstance().GetBoolFlag(
       config_package_nearby::nearby_connections_feature::
           kEnableSafeToDisconnect);
-  support_auto_reconnect_ = NearbyFlags::GetInstance().GetBoolFlag(
-      config_package_nearby::nearby_connections_feature::kEnableAutoReconnect);
-  local_safe_to_disconnect_version_ = NearbyFlags::GetInstance().GetInt64Flag(
-      config_package_nearby::nearby_connections_feature::
-          kSafeToDisconnectVersion);
-  NEARBY_LOGS(INFO) << "[safe-to-disconnect]: Local enabled: "
-                    << supports_safe_to_disconnect_
-                    << "; Version: " << local_safe_to_disconnect_version_;
+  LOG(INFO) << "[safe-to-disconnect]: Local enabled: "
+            << supports_safe_to_disconnect_ << "; Version: "
+            << NearbyFlags::GetInstance().GetInt64Flag(
+                   config_package_nearby::nearby_connections_feature::
+                       kSafeToDisconnectVersion);
+  // Generate a 7 bits dedup value.
+  absl::BitGen bitgen;
+  dct_dedup_ = absl::Uniform(bitgen, 0, 1 << 7);
+
+  // Load advertising info from preferences.
+  LoadClientInfoFromPreferences();
+
+  if (preferences_manager_ != nullptr) {
+    app_lifecycle_monitor_ =
+        api::ImplementationPlatform::CreateAppLifecycleMonitor(
+            [this](api::AppLifecycleMonitor::AppLifecycleState state) {
+              if (state ==
+                      api::AppLifecycleMonitor::AppLifecycleState::kInactive ||
+                  state == api::AppLifecycleMonitor::AppLifecycleState::
+                               kBackground) {
+                SaveClientInfoToPreferences();
+              }
+            });
+  }
 }
 
 ClientProxy::~ClientProxy() { Reset(); }
@@ -115,24 +153,26 @@ std::int64_t ClientProxy::GetClientId() const { return client_id_; }
 
 std::string ClientProxy::GetLocalEndpointId() {
   MutexLock lock(&mutex_);
-  if (!local_endpoint_id_.empty()) {
-    NEARBY_LOGS(INFO) << __func__
-                      << ": Reusing cached endpoint id: " << local_endpoint_id_;
+  if (IsDctEnabled() && GetEndpointIdForDct().has_value()) {
+    LOG(INFO) << "DCT is using genereted endpoint id.";
+    return GetEndpointIdForDct().value();
+  } else {
+    if (!local_endpoint_id_.empty()) {
+      LOG(INFO) << __func__
+                << ": Reusing cached endpoint id: " << local_endpoint_id_;
+      return local_endpoint_id_;
+    }
+    if (external_device_provider_ == nullptr) {
+      local_endpoint_id_ = GenerateLocalEndpointId();
+    } else {
+      local_endpoint_id_ =
+          external_device_provider_->GetLocalDevice()->GetEndpointId();
+      LOG(INFO) << __func__
+                << ": From external device provider, populating endpoint id: "
+                << local_endpoint_id_;
+    }
     return local_endpoint_id_;
   }
-  if (external_device_provider_ == nullptr) {
-    local_endpoint_id_ = GenerateLocalEndpointId();
-    NEARBY_LOGS(INFO) << __func__ << ": Locally generating endpoint id: "
-                      << local_endpoint_id_;
-  } else {
-    local_endpoint_id_ =
-        external_device_provider_->GetLocalDevice()->GetEndpointId();
-    NEARBY_LOGS(INFO)
-        << __func__
-        << ": From external device provider, populating endpoint id: "
-        << local_endpoint_id_;
-  }
-  return local_endpoint_id_;
 }
 
 const NearbyDevice* ClientProxy::GetLocalDevice() {
@@ -155,39 +195,48 @@ std::string ClientProxy::GetConnectionToken(const std::string& endpoint_id) {
   return {};
 }
 
-std::optional<std::string> ClientProxy::GetBluetoothMacAddress(
+bool ClientProxy::OverrideSavePath(absl::string_view endpoint_id,
+                                   absl::string_view path) {
+  MutexLock lock(&mutex_);
+  ConnectionPair* item = LookupConnection(endpoint_id);
+  if (item != nullptr) {
+    item->first.save_path = path;
+    return true;
+  }
+  return false;
+}
+
+std::string ClientProxy::GetSavePath(
+    absl::string_view endpoint_id) const {
+  MutexLock lock(&mutex_);
+  const ConnectionPair* item = LookupConnection(endpoint_id);
+  if (item != nullptr) {
+    return item->first.save_path;
+  }
+  return "";
+}
+
+std::optional<MacAddress> ClientProxy::GetBluetoothMacAddress(
     const std::string& endpoint_id) {
   auto item = bluetooth_mac_addresses_.find(endpoint_id);
   if (item != bluetooth_mac_addresses_.end()) return item->second;
   return std::nullopt;
 }
 
-void ClientProxy::SetBluetoothMacAddress(
-    const std::string& endpoint_id, const std::string& bluetooth_mac_address) {
+void ClientProxy::SetBluetoothMacAddress(const std::string& endpoint_id,
+                                         MacAddress bluetooth_mac_address) {
   bluetooth_mac_addresses_[endpoint_id] = bluetooth_mac_address;
 }
 
 std::string ClientProxy::GenerateLocalEndpointId() {
-  if (IsFeatureUseStableEndpointIdEnabled()) {
-    if (!cached_endpoint_id_.empty()) {
-      if (stable_endpoint_id_mode_) {
-        NEARBY_LOGS(INFO) << "ClientProxy [Local Endpoint Re-using cached "
-                             "endpoint id due to in stable endpoint id mode]: "
-                             "client="
-                          << GetClientId()
-                          << "; cached_endpoint_id_=" << cached_endpoint_id_;
-        return cached_endpoint_id_;
-      }
-    }
-  } else {
-    if (high_vis_mode_) {
-      if (!cached_endpoint_id_.empty()) {
-        NEARBY_LOGS(INFO) << "ClientProxy [Local Endpoint Re-using cached "
-                             "endpoint id]: client="
-                          << GetClientId()
-                          << "; cached_endpoint_id_=" << cached_endpoint_id_;
-        return cached_endpoint_id_;
-      }
+  if (!cached_endpoint_id_.empty()) {
+    if (stable_endpoint_id_mode_) {
+      LOG(INFO) << "ClientProxy [Local Endpoint Re-using cached "
+                    "endpoint id due to in stable endpoint id mode]: "
+                    "client="
+                << GetClientId()
+                << "; cached_endpoint_id_=" << cached_endpoint_id_;
+      return cached_endpoint_id_;
     }
   }
   std::string id;
@@ -195,6 +244,8 @@ std::string ClientProxy::GenerateLocalEndpointId() {
   for (int i = 0; i < kEndpointIdLength; i++) {
     id += kEndpointIdChars[prng.NextUint32() % sizeof(kEndpointIdChars)];
   }
+  LOG(INFO) << "ClientProxy [Local Endpoint Generated]: client="
+            << GetClientId() << "; endpoint_id=" << id;
   return id;
 }
 
@@ -204,11 +255,7 @@ void ClientProxy::Reset() {
   StoppedAdvertising();
   StoppedDiscovery();
   RemoveAllEndpoints();
-  if (IsFeatureUseStableEndpointIdEnabled()) {
-    ExitStableEndpointIdMode();
-  } else {
-    ExitHighVisibilityMode();
-  }
+  ExitStableEndpointIdMode();
 }
 
 void ClientProxy::StartedAdvertising(
@@ -219,26 +266,15 @@ void ClientProxy::StartedAdvertising(
         operation_result_with_mediums,
     const AdvertisingOptions& advertising_options) {
   MutexLock lock(&mutex_);
-  NEARBY_LOGS(INFO) << "ClientProxy [StartedAdvertising]: client="
-                    << GetClientId();
+  LOG(INFO) << "ClientProxy [StartedAdvertising]: client=" << GetClientId();
 
-  if (IsFeatureUseStableEndpointIdEnabled()) {
-    if (stable_endpoint_id_mode_) {
-      cached_endpoint_id_ = local_endpoint_id_;
-    } else {
-      cached_endpoint_id_.clear();
-    }
-
-    CancelClearCachedEndpointIdAlarm();
+  if (stable_endpoint_id_mode_) {
+    cached_endpoint_id_ = local_endpoint_id_;
   } else {
-    if (high_vis_mode_) {
-      cached_endpoint_id_ = local_endpoint_id_;
-      NEARBY_LOGS(INFO)
-          << "ClientProxy [High Visibility Mode Adv, Cache EndpointId]: client="
-          << GetClientId() << "; cached_endpoint_id_=" << cached_endpoint_id_;
-      CancelClearCachedEndpointIdAlarm();
-    }
+    cached_endpoint_id_.clear();
   }
+
+  CancelClearCachedEndpointIdAlarm();
 
   advertising_info_ = {service_id, listener};
   advertising_options_ = advertising_options;
@@ -256,8 +292,7 @@ void ClientProxy::StartedAdvertising(
 
 void ClientProxy::StoppedAdvertising() {
   MutexLock lock(&mutex_);
-  NEARBY_LOGS(INFO) << "ClientProxy [StoppedAdvertising]: client="
-                    << GetClientId();
+  LOG(INFO) << "ClientProxy [StoppedAdvertising]: client=" << GetClientId();
 
   if (IsAdvertising()) {
     advertising_info_.Clear();
@@ -267,11 +302,7 @@ void ClientProxy::StoppedAdvertising() {
   // advertising_options_ is purposefully not cleared here.
   OnSessionComplete();
 
-  if (IsFeatureUseStableEndpointIdEnabled()) {
-    ExitStableEndpointIdMode();
-  } else {
-    ExitHighVisibilityMode();
-  }
+  ExitStableEndpointIdMode();
 }
 
 bool ClientProxy::IsAdvertising() const {
@@ -424,21 +455,19 @@ void ClientProxy::OnEndpointFound(
     location::nearby::proto::connections::Medium medium) {
   MutexLock lock(&mutex_);
 
-  NEARBY_LOGS(INFO) << "ClientProxy [Endpoint Found]: [enter] id="
-                    << endpoint_id << "; service=" << service_id
-                    << "; info=" << absl::BytesToHexString(endpoint_info.data())
-                    << "; medium="
-                    << location::nearby::proto::connections::Medium_Name(
-                           medium);
+  LOG(INFO) << "ClientProxy [Endpoint Found]: [enter] id=" << endpoint_id
+            << "; service=" << service_id
+            << "; info=" << absl::BytesToHexString(endpoint_info.data())
+            << "; medium="
+            << location::nearby::proto::connections::Medium_Name(medium);
   if (!IsDiscoveringServiceId(service_id)) {
-    NEARBY_LOGS(INFO) << "ClientProxy [Endpoint Found]: Ignoring event for id="
-                      << endpoint_id
-                      << " because this client is not discovering.";
+    LOG(INFO) << "ClientProxy [Endpoint Found]: Ignoring event for id="
+              << endpoint_id << " because this client is not discovering.";
     return;
   }
 
   if (discovered_endpoint_ids_.count(endpoint_id)) {
-    NEARBY_LOGS(WARNING)
+    LOG(WARNING)
         << "ClientProxy [Endpoint Found]: Ignoring event for id=" << endpoint_id
         << " because this client has already reported this endpoint as found.";
     return;
@@ -454,18 +483,17 @@ void ClientProxy::OnEndpointLost(const std::string& service_id,
                                  const std::string& endpoint_id) {
   MutexLock lock(&mutex_);
 
-  NEARBY_LOGS(INFO) << "ClientProxy [Endpoint Lost]: [enter] id=" << endpoint_id
-                    << "; service=" << service_id;
+  LOG(INFO) << "ClientProxy [Endpoint Lost]: [enter] id=" << endpoint_id
+            << "; service=" << service_id;
   if (!IsDiscoveringServiceId(service_id)) {
-    NEARBY_LOGS(INFO) << "ClientProxy [Endpoint Lost]: Ignoring event for id="
-                      << endpoint_id
-                      << " because this client is not discovering.";
+    LOG(INFO) << "ClientProxy [Endpoint Lost]: Ignoring event for id="
+              << endpoint_id << " because this client is not discovering.";
     return;
   }
 
   const auto it = discovered_endpoint_ids_.find(endpoint_id);
   if (it == discovered_endpoint_ids_.end()) {
-    NEARBY_LOGS(WARNING)
+    LOG(WARNING)
         << "ClientProxy [Endpoint Lost]: Ignoring event for id=" << endpoint_id
         << " because this client has not yet reported this endpoint as found";
     return;
@@ -478,7 +506,7 @@ void ClientProxy::OnEndpointLost(const std::string& service_id,
 void ClientProxy::OnRequestConnection(
     const Strategy& strategy, const std::string& endpoint_id,
     const ConnectionOptions& connection_options) {
-  NEARBY_LOGS(INFO) << "ClientProxy [RequestConnection]: id=" << endpoint_id;
+  LOG(INFO) << "ClientProxy [RequestConnection]: id=" << endpoint_id;
   analytics_recorder_->OnRequestConnection(strategy, endpoint_id);
 }
 
@@ -508,10 +536,9 @@ void ClientProxy::OnConnectionInitiated(
   // (can not use c++17 features, until chromium does) we unpack manually.
   auto& pair_iter = result.first;
   bool inserted = result.second;
-  NEARBY_LOGS(INFO)
-      << "ClientProxy [Connection Initiated]: add Connection: client="
-      << GetClientId() << "; endpoint_id=" << endpoint_id
-      << "; inserted=" << inserted;
+  LOG(INFO) << "ClientProxy [Connection Initiated]: add Connection: client="
+            << GetClientId() << "; endpoint_id=" << endpoint_id
+            << "; inserted=" << inserted;
   DCHECK(inserted);
   const ConnectionPair& item = pair_iter->second;
   // Notify the client.
@@ -530,13 +557,13 @@ void ClientProxy::OnConnectionInitiated(
 }
 
 void ClientProxy::OnConnectionAccepted(const std::string& endpoint_id) {
-  NEARBY_LOGS(INFO) << "ClientProxy [ConnectionAccepted]: id=" << endpoint_id;
+  LOG(INFO) << "ClientProxy [ConnectionAccepted]: id=" << endpoint_id;
   MutexLock lock(&mutex_);
 
   if (!HasPendingConnectionToEndpoint(endpoint_id)) {
-    NEARBY_LOGS(INFO) << "ClientProxy [Connection Accepted]: no pending "
-                         "connection; endpoint_id="
-                      << endpoint_id;
+    LOG(INFO) << "ClientProxy [Connection Accepted]: no pending "
+                 "connection; endpoint_id="
+              << endpoint_id;
     return;
   }
 
@@ -550,13 +577,13 @@ void ClientProxy::OnConnectionAccepted(const std::string& endpoint_id) {
 
 void ClientProxy::OnConnectionRejected(const std::string& endpoint_id,
                                        const Status& status) {
-  NEARBY_LOGS(INFO) << "ClientProxy [ConnectionRejected]: id=" << endpoint_id;
+  LOG(INFO) << "ClientProxy [ConnectionRejected]: id=" << endpoint_id;
   MutexLock lock(&mutex_);
 
   if (!HasPendingConnectionToEndpoint(endpoint_id)) {
-    NEARBY_LOGS(INFO) << "ClientProxy [Connection Rejected]: no pending "
-                         "connection; endpoint_id="
-                      << endpoint_id;
+    LOG(INFO) << "ClientProxy [Connection Rejected]: no pending "
+                 "connection; endpoint_id="
+              << endpoint_id;
     return;
   }
 
@@ -570,7 +597,7 @@ void ClientProxy::OnConnectionRejected(const std::string& endpoint_id,
 
 void ClientProxy::OnBandwidthChanged(const std::string& endpoint_id,
                                      Medium new_medium) {
-  NEARBY_LOGS(INFO) << "ClientProxy [BandwidthChanged]: id=" << endpoint_id;
+  LOG(INFO) << "ClientProxy [BandwidthChanged]: id=" << endpoint_id;
   MutexLock lock(&mutex_);
 
   ConnectionPair* item = LookupConnection(endpoint_id);
@@ -578,13 +605,13 @@ void ClientProxy::OnBandwidthChanged(const std::string& endpoint_id,
     item->first.connected_medium = new_medium;
     item->first.connection_listener.bandwidth_changed_cb(endpoint_id,
                                                          new_medium);
-    NEARBY_LOGS(INFO) << "ClientProxy [reporting onBandwidthChanged]: client="
-                      << GetClientId() << "; endpoint_id=" << endpoint_id;
+    LOG(INFO) << "ClientProxy [reporting onBandwidthChanged]: client="
+              << GetClientId() << "; endpoint_id=" << endpoint_id;
   }
 }
 
 void ClientProxy::OnDisconnected(const std::string& endpoint_id, bool notify) {
-  NEARBY_LOGS(INFO) << "ClientProxy [OnDisconnected]: id=" << endpoint_id;
+  LOG(INFO) << "ClientProxy [OnDisconnected]: id=" << endpoint_id;
   MutexLock lock(&mutex_);
 
   const ConnectionPair* item = LookupConnection(endpoint_id);
@@ -598,10 +625,8 @@ void ClientProxy::OnDisconnected(const std::string& endpoint_id, bool notify) {
 
   CancelEndpoint(endpoint_id);
 
-  if (IsFeatureUseStableEndpointIdEnabled()) {
-    if (!stable_endpoint_id_mode_ && !HasOngoingConnection()) {
-      ScheduleClearCachedEndpointIdAlarm();
-    }
+  if (!stable_endpoint_id_mode_ && !HasOngoingConnection()) {
+    ScheduleClearCachedEndpointIdAlarm();
   }
 }
 
@@ -666,16 +691,6 @@ std::int32_t ClientProxy::GetApFrequency(const std::string& endpoint_id) const {
     return item->first.connection_options.connection_info.ap_frequency;
   }
   return -1;
-}
-
-std::string ClientProxy::GetIPAddress(const std::string& endpoint_id) const {
-  MutexLock lock(&mutex_);
-
-  const ConnectionPair* item = LookupConnection(endpoint_id);
-  if (item != nullptr) {
-    return item->first.connection_options.connection_info.ip_address;
-  }
-  return {};
 }
 
 bool ClientProxy::IsConnectedToEndpoint(const std::string& endpoint_id) const {
@@ -784,13 +799,13 @@ void ClientProxy::LocalEndpointAcceptedConnection(
     const std::string& endpoint_id, PayloadListener listener) {
   MutexLock lock(&mutex_);
   if (HasLocalEndpointResponded(endpoint_id)) {
-    NEARBY_LOGS(INFO)
+    LOG(INFO)
         << "ClientProxy [Local Accepted]: local endpoint has responded; id="
         << endpoint_id;
     return;
   }
   AppendConnectionStatus(endpoint_id, Connection::kLocalEndpointAccepted);
-  NEARBY_LOGS(INFO) << "ClientProxy [Local Accepted]: id=" << endpoint_id;
+  LOG(INFO) << "ClientProxy [Local Accepted]: id=" << endpoint_id;
   ConnectionPair* item = LookupConnection(endpoint_id);
   if (item != nullptr) {
     item->second = std::move(listener);
@@ -803,7 +818,7 @@ void ClientProxy::LocalEndpointRejectedConnection(
   MutexLock lock(&mutex_);
 
   if (HasLocalEndpointResponded(endpoint_id)) {
-    NEARBY_LOGS(INFO)
+    LOG(INFO)
         << "ClientProxy [Local Rejected]: local endpoint has responded; id="
         << endpoint_id;
     return;
@@ -818,7 +833,7 @@ void ClientProxy::RemoteEndpointAcceptedConnection(
   MutexLock lock(&mutex_);
 
   if (HasRemoteEndpointResponded(endpoint_id)) {
-    NEARBY_LOGS(INFO)
+    LOG(INFO)
         << "ClientProxy [Remote Accepted]: remote endpoint has responded; id="
         << endpoint_id;
     return;
@@ -833,7 +848,7 @@ void ClientProxy::RemoteEndpointRejectedConnection(
   MutexLock lock(&mutex_);
 
   if (HasRemoteEndpointResponded(endpoint_id)) {
-    NEARBY_LOGS(INFO)
+    LOG(INFO)
         << "ClientProxy [Remote Rejected]: remote endpoint has responded; id="
         << endpoint_id;
     return;
@@ -950,6 +965,11 @@ std::optional<OsInfo> ClientProxy::GetRemoteOsInfo(
   return std::nullopt;
 }
 
+void ClientProxy::SetLocalOsType(
+    const location::nearby::connections::OsInfo::OsType& os_type) {
+  local_os_info_.set_type(os_type);
+}
+
 void ClientProxy::SetRemoteOsInfo(absl::string_view endpoint_id,
                                   const OsInfo& remote_os_info) {
   ConnectionPair* item = LookupConnection(endpoint_id);
@@ -987,14 +1007,6 @@ bool ClientProxy::IsSafeToDisconnectEnabled(absl::string_view endpoint_id) {
               .min_nc_version_supports_safe_to_disconnect);
 }
 
-bool ClientProxy::IsAutoReconnectEnabled(absl::string_view endpoint_id) {
-  return IsSupportAutoReconnect() &&
-         GetRemoteSafeToDisconnectVersion(endpoint_id).has_value() &&
-         (GetRemoteSafeToDisconnectVersion(endpoint_id) >=
-          FeatureFlags::GetInstance()
-              .GetFlags()
-              .min_nc_version_supports_auto_reconnect);
-}
 
 bool ClientProxy::IsPayloadReceivedAckEnabled(absl::string_view endpoint_id) {
   return IsSupportSafeToDisconnect() &&
@@ -1022,9 +1034,10 @@ void ClientProxy::OnPayload(const std::string& endpoint_id, Payload payload) {
     const std::pair<ClientProxy::Connection, PayloadListener>* item =
         LookupConnection(endpoint_id);
     if (item != nullptr) {
-      NEARBY_LOGS(INFO) << "ClientProxy [reporting onPayloadReceived]: client="
-                        << GetClientId() << "; endpoint_id=" << endpoint_id
-                        << " ; payload_id=" << payload.GetId();
+      LOG(INFO) << "ClientProxy [reporting onPayloadReceived]: client="
+                << GetClientId() << "; endpoint_id=" << endpoint_id
+                << " ; payload {id:" << payload.GetId()
+                << ", type:" << payload.GetType() << "}";
       item->second.payload_cb(endpoint_id, std::move(payload));
     }
   }
@@ -1053,16 +1066,15 @@ void ClientProxy::OnPayloadProgress(const std::string& endpoint_id,
       item->second.payload_progress_cb(endpoint_id, info);
 
       if (info.status == PayloadProgressInfo::Status::kInProgress) {
-        NEARBY_VLOG(1) << "ClientProxy [reporting onPayloadProgress]: client="
-                       << GetClientId() << "; endpoint_id=" << endpoint_id
-                       << "; payload_id=" << info.payload_id
-                       << ", payload_status=" << ToString(info.status);
+        VLOG(1) << "ClientProxy [reporting onPayloadProgress]: client="
+                << GetClientId() << "; endpoint_id=" << endpoint_id
+                << "; payload_id=" << info.payload_id
+                << ", payload_status=" << ToString(info.status);
       } else {
-        NEARBY_LOGS(INFO)
-            << "ClientProxy [reporting onPayloadProgress]: client="
-            << GetClientId() << "; endpoint_id=" << endpoint_id
-            << "; payload_id=" << info.payload_id
-            << ", payload_status=" << ToString(info.status);
+        LOG(INFO) << "ClientProxy [reporting onPayloadProgress]: client="
+                  << GetClientId() << "; endpoint_id=" << endpoint_id
+                  << "; payload_id=" << info.payload_id
+                  << ", payload_status=" << ToString(info.status);
       }
     }
   }
@@ -1121,35 +1133,17 @@ v3::ConnectionListeningOptions ClientProxy::GetListeningOptions() const {
   return listening_options_;
 }
 
-void ClientProxy::EnterHighVisibilityMode() {
-  MutexLock lock(&mutex_);
-  NEARBY_LOGS(INFO) << "ClientProxy [EnterHighVisibilityMode]: client="
-                    << GetClientId();
-
-  high_vis_mode_ = true;
-}
-
-void ClientProxy::ExitHighVisibilityMode() {
-  MutexLock lock(&mutex_);
-  NEARBY_LOGS(INFO) << "ClientProxy [ExitHighVisibilityMode]: client="
-                    << GetClientId();
-
-  high_vis_mode_ = false;
-  ScheduleClearCachedEndpointIdAlarm();
-}
-
 void ClientProxy::EnterStableEndpointIdMode() {
   MutexLock lock(&mutex_);
-  NEARBY_LOGS(INFO) << "ClientProxy [EnterStableEndpointIdMode]: client="
-                    << GetClientId();
+  VLOG(1) << "ClientProxy [EnterStableEndpointIdMode]: client="
+          << GetClientId();
 
   stable_endpoint_id_mode_ = true;
 }
 
 void ClientProxy::ExitStableEndpointIdMode() {
   MutexLock lock(&mutex_);
-  NEARBY_LOGS(INFO) << "ClientProxy [ExitStableEndpointIdMode]: client="
-                    << GetClientId();
+  VLOG(1) << "ClientProxy [ExitStableEndpointIdMode]: client=" << GetClientId();
 
   stable_endpoint_id_mode_ = false;
   ScheduleClearCachedEndpointIdAlarm();
@@ -1159,39 +1153,28 @@ void ClientProxy::ScheduleClearCachedEndpointIdAlarm() {
   CancelClearCachedEndpointIdAlarm();
 
   if (cached_endpoint_id_.empty()) {
-    NEARBY_VLOG(1) << "ClientProxy [There is no cached local high power "
-                      "advertising endpoint Id]: client="
-                   << GetClientId();
+    VLOG(1) << "ClientProxy [There is no cached local high power "
+               "advertising endpoint Id]: client="
+            << GetClientId();
     return;
   }
 
-  if (IsFeatureUseStableEndpointIdEnabled() && HasOngoingConnection()) {
-    NEARBY_VLOG(1) << "ClientProxy [Handle clearing cached endpoint ID "
-                      "during disconnection]: client="
-                   << GetClientId();
+  if (HasOngoingConnection()) {
+    VLOG(1) << "ClientProxy [Handle clearing cached endpoint ID "
+               "during disconnection]: client="
+            << GetClientId();
     return;
   }
 
   // Schedule to clear cache high visibility mode advertisement endpoint id in
   // 30s.
-  NEARBY_LOGS(INFO) << "ClientProxy [High Visibility Mode Adv, Schedule to "
-                       "Clear Cache EndpointId]: client="
-                    << GetClientId()
-                    << "; cached_endpoint_id_=" << cached_endpoint_id_;
-  cached_endpoint_id_alarm_ =
-      std::make_unique<CancelableAlarm>(
-          "clear_high_power_endpoint_id_cache",
-          [this]() {
-            MutexLock lock(&mutex_);
-            NEARBY_LOGS(INFO)
-                << "ClientProxy [Cleared cached local high power advertising "
-                   "endpoint Id.]: client="
-                << GetClientId()
-                << "; cached_endpoint_id_=" << cached_endpoint_id_;
-            cached_endpoint_id_.clear();
-          },
-          kHighPowerAdvertisementEndpointIdCacheTimeout,
-          &single_thread_executor_);
+  LOG(INFO) << "ClientProxy [High Visibility Mode Adv, Schedule to "
+               "Clear Cache EndpointId]: client="
+            << GetClientId() << "; cached_endpoint_id_=" << cached_endpoint_id_;
+  cached_endpoint_id_alarm_ = std::make_unique<CancelableAlarm>(
+      "clear_high_power_endpoint_id_cache",
+      [this]() { ClearCachedLocalEndpointId(); },
+      kHighPowerAdvertisementEndpointIdCacheTimeout, &single_thread_executor_);
 }
 
 void ClientProxy::CancelClearCachedEndpointIdAlarm() {
@@ -1199,6 +1182,13 @@ void ClientProxy::CancelClearCachedEndpointIdAlarm() {
     cached_endpoint_id_alarm_->Cancel();
     cached_endpoint_id_alarm_.reset();
   }
+}
+
+void ClientProxy::ClearCachedLocalEndpointId() {
+  MutexLock lock(&mutex_);
+  LOG(INFO) << "ClientProxy [Cleared cached local endpoint Id.]: client="
+            << GetClientId() << "; cached_endpoint_id_=" << cached_endpoint_id_;
+  cached_endpoint_id_.clear();
 }
 
 OsInfo::OsType ClientProxy::OSNameToOsInfoType(api::OSName osName) {
@@ -1217,24 +1207,6 @@ OsInfo::OsType ClientProxy::OSNameToOsInfoType(api::OSName osName) {
 }
 
 std::int32_t ClientProxy::GetLocalMultiplexSocketBitmask() const {
-  if (NearbyFlags::GetInstance().GetBoolFlag(
-          config_package_nearby::nearby_connections_feature::
-              kEnableMultiplex)) {
-    std::int32_t multiplex_bitmask =
-        (NearbyFlags::GetInstance().GetBoolFlag(
-             config_package_nearby::nearby_connections_feature::
-                 kEnableMultiplexBluetooth)
-             ? kBtMultiplexEnabled
-             : 0) |
-        (NearbyFlags::GetInstance().GetBoolFlag(
-             config_package_nearby::nearby_connections_feature::
-                 kEnableMultiplexWifiLan)
-             ? kWifiLanMultiplexEnabled
-             : 0);
-    NEARBY_LOGS(INFO) << "ClientProxy [GetLocalMultiplexSocketBitmask]: "
-                      << multiplex_bitmask;
-    return multiplex_bitmask;
-  }
   return 0;
 }
 
@@ -1244,8 +1216,8 @@ void ClientProxy::SetRemoteMultiplexSocketBitmask(
   if (item != nullptr) {
     item->first.remote_multiplex_socket_bitmask =
         remote_multiplex_socket_bitmask;
-    NEARBY_LOGS(INFO) << "ClientProxy [SetRemoteMultiplexSocketBitmask]: "
-                      << remote_multiplex_socket_bitmask;
+    LOG(INFO) << "ClientProxy [SetRemoteMultiplexSocketBitmask]: "
+              << remote_multiplex_socket_bitmask;
   }
 }
 
@@ -1253,8 +1225,8 @@ bool ClientProxy::IsLocalMultiplexSocketSupported(Medium medium) {
   int bitmask = GetLocalMultiplexSocketBitmask();
   switch (medium) {
     case Medium::BLUETOOTH:
-      NEARBY_LOGS(INFO) << "ClientProxy [IsLocalMultiplexSocketSupported]: "
-                        << (bitmask & kBtMultiplexEnabled);
+      LOG(INFO) << "ClientProxy [IsLocalMultiplexSocketSupported]: "
+                << (bitmask & kBtMultiplexEnabled);
       return (bitmask & kBtMultiplexEnabled) != 0;
     case Medium::WIFI_LAN:
       return (bitmask & kWifiLanMultiplexEnabled) != 0;
@@ -1294,11 +1266,136 @@ bool ClientProxy::IsMultiplexSocketSupported(absl::string_view endpoint_id,
 bool ClientProxy::GetWebRtcNonCellular() { return webrtc_non_cellular_; }
 
 void ClientProxy::SetWebRtcNonCellular(bool webrtc_non_cellular) {
-  std::string allow_webrtc_cellular_str =
-      webrtc_non_cellular ? "disallow" : "allow";
-  NEARBY_LOGS(INFO) << "ClientProxy: client=" << GetClientId()
-                    << allow_webrtc_cellular_str << " to use mobile data.",
-      webrtc_non_cellular_ = webrtc_non_cellular;
+  VLOG(1) << "ClientProxy: client=" << GetClientId()
+          << (webrtc_non_cellular ? " disallow" : " allow")
+          << " to use mobile data.";
+  webrtc_non_cellular_ = webrtc_non_cellular;
+}
+
+bool ClientProxy::IsDctEnabled() const { return is_dct_enabled_; }
+
+uint8_t ClientProxy::GetDctDedup() const { return dct_dedup_; }
+
+void ClientProxy::UpdateDctDeviceName(absl::string_view device_name) {
+  if (!dct_device_name_.empty() && dct_device_name_ != device_name) {
+    // Need to update dedup value if device name is changed.
+    absl::BitGen bitgen;
+    dct_dedup_ = absl::Uniform(bitgen, 0, 1 << 7);
+  }
+
+  dct_device_name_ = device_name;
+
+  // The DCT endpoint ID should be derived from device name and dedup value.
+  std::optional<std::string> dct_endpoint_id =
+      advertisements::ble::DctAdvertisement::GenerateEndpointId(
+          dct_dedup_, dct_device_name_);
+  if (dct_endpoint_id.has_value()) {
+    dct_endpoint_id_ = *dct_endpoint_id;
+  } else {
+    dct_endpoint_id_.clear();
+  }
+}
+
+std::optional<MediumRole> ClientProxy::GetMediumRole(
+    absl::string_view endpoint_id) const {
+  const ConnectionPair* item = LookupConnection(endpoint_id);
+  if (item != nullptr) {
+    return item->first.connection_options.connection_info.medium_role;
+  }
+  return std::nullopt;
+}
+
+std::optional<std::string> ClientProxy::GetEndpointIdForDct() const {
+  if (dct_endpoint_id_.empty()) {
+    return std::nullopt;
+  }
+
+  return dct_endpoint_id_;
+}
+
+#ifdef NEARBY_CHROMIUM
+void ClientProxy::InitializePreferencesManager() {
+  // This method is not currently used by Chromium.
+  NOTREACHED();
+}
+#else
+void ClientProxy::InitializePreferencesManager() {
+  LOG(INFO) << "ClientProxy [InitializePreferencesManager]: client="
+            << GetClientId();
+  std::unique_ptr<nearby::api::DeviceInfo> device_info_ =
+      nearby::api::ImplementationPlatform::CreateDeviceInfo();
+
+  FilePath preferences_path =
+      device_info_->GetLocalAppDataPath(FilePath(kPreferencesFilePath));
+
+  if (!Files::FileExists(preferences_path)) {
+    Files::CreateDirectories(preferences_path);
+  }
+
+  preferences_manager_ = api::ImplementationPlatform::CreatePreferencesManager(
+      preferences_path.ToString());
+
+  if (preferences_manager_ == nullptr) {
+    LOG(ERROR) << "ClientProxy [Failed to initialize preferences manager]: "
+                  "client="
+               << GetClientId();
+  }
+}
+#endif
+
+void ClientProxy::SaveClientInfoToPreferences() {
+  MutexLock lock(&mutex_);
+  if (preferences_manager_ == nullptr) {
+    return;
+  }
+
+  if (advertising_info_.IsEmpty()) {
+    preferences_manager_->Remove(kAdvertisingEndpointId);
+    preferences_manager_->Remove(kAdvertisingTimestamp);
+    return;
+  }
+
+  preferences_manager_->SetString(kAdvertisingEndpointId, local_endpoint_id_);
+  preferences_manager_->SetTime(kAdvertisingTimestamp,
+                                SystemClock::ElapsedRealtime());
+
+  LOG(INFO) << "ClientProxy [SaveClientInfoToPreferences]: client="
+            << GetClientId() << "; local_endpoint_id_=" << local_endpoint_id_;
+}
+
+void ClientProxy::LoadClientInfoFromPreferences() {
+  MutexLock lock(&mutex_);
+  if (preferences_manager_ == nullptr) {
+    return;
+  }
+
+  absl::Time last_advertising_time = preferences_manager_->GetTime(
+      kAdvertisingTimestamp, absl::InfinitePast());
+  if (SystemClock::ElapsedRealtime() - last_advertising_time <
+      kAdvertisingKeepAliveDuration) {
+    std::string endpoint_id =
+        preferences_manager_->GetString(kAdvertisingEndpointId, "");
+    if (!endpoint_id.empty() && endpoint_id.length() == kEndpointIdLength) {
+      bool is_valid_endpoint_id = true;
+      for (const auto& c : endpoint_id) {
+        if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))) {
+          is_valid_endpoint_id = false;
+          break;
+        }
+      }
+
+      if (is_valid_endpoint_id) {
+        local_endpoint_id_ = endpoint_id;
+        cached_endpoint_id_ = local_endpoint_id_;
+        LOG(INFO) << "ClientProxy [LoadClientInfoFromPreferences]: client="
+                  << GetClientId()
+                  << "; local_endpoint_id_=" << local_endpoint_id_;
+      }
+    }
+  }
+
+  preferences_manager_->Remove(kAdvertisingEndpointId);
+  preferences_manager_->Remove(kAdvertisingTimestamp);
 }
 
 std::string ClientProxy::ToString(PayloadProgressInfo::Status status) const {
@@ -1320,7 +1417,6 @@ std::string ClientProxy::Dump() {
   sstream << "  Client ID: " << GetClientId() << std::endl;
   sstream << "  Local Endpoint ID: " << GetLocalEndpointId() << std::endl;
   sstream << std::boolalpha;
-  sstream << "  High Visibility Mode: " << high_vis_mode_ << std::endl;
   sstream << "  Is Advertising: " << IsAdvertising() << std::endl;
   sstream << "  Is Discovering: " << IsDiscovering() << std::endl;
   sstream << std::noboolalpha;
@@ -1348,5 +1444,4 @@ std::string ClientProxy::Dump() {
   return sstream.str();
 }
 
-}  // namespace connections
-}  // namespace nearby
+}  // namespace nearby::connections

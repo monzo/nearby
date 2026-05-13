@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+
 licenses(["notice"])
 
 cc_library(
@@ -48,6 +51,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":format",
+        "//internal/platform:types",
         "//sharing/internal/api:platform",
         "//sharing/internal/public:logging",
         "//sharing/internal/public:types",
@@ -93,7 +97,7 @@ cc_test(
     ],
     deps = [
         ":scheduling",
-        "//internal/platform/implementation/g3",  # fixdeps: keep
+        "//internal/platform/implementation:platform_impl",
         "//internal/test",
         "//sharing/internal/api:platform",
         "//sharing/internal/public:types",

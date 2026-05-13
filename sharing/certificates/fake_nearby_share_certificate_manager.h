@@ -24,13 +24,12 @@
 #include <string>
 #include <vector>
 
-#include "absl/strings/string_view.h"
+#include "location/nearby/sharing/lib/rpc/sharing_rpc_client.h"
+#include "internal/base/file_path.h"
 #include "sharing/certificates/nearby_share_certificate_manager.h"
 #include "sharing/certificates/nearby_share_certificate_manager_impl.h"
 #include "sharing/certificates/nearby_share_encrypted_metadata_key.h"
 #include "sharing/certificates/nearby_share_private_certificate.h"
-#include "sharing/contacts/nearby_share_contact_manager.h"
-#include "sharing/internal/api/sharing_rpc_client.h"
 #include "sharing/internal/public/context.h"
 #include "sharing/local_device_data/nearby_share_local_device_data_manager.h"
 #include "sharing/proto/rpc_resources.pb.h"
@@ -61,9 +60,8 @@ class FakeNearbyShareCertificateManager : public NearbyShareCertificateManager {
     std::unique_ptr<NearbyShareCertificateManager> CreateInstance(
         Context* context,
         NearbyShareLocalDeviceDataManager* local_device_data_manager,
-        NearbyShareContactManager* contact_manager,
-        absl::string_view profile_path,
-        nearby::sharing::api::SharingRpcClientFactory* client_factory) override;
+        const FilePath& profile_path,
+        nearby::sharing::api::IdentityRpcClient* identity_client) override;
 
     std::vector<FakeNearbyShareCertificateManager*> instances_;
   };
@@ -91,14 +89,11 @@ class FakeNearbyShareCertificateManager : public NearbyShareCertificateManager {
   ~FakeNearbyShareCertificateManager() override;
 
   // NearbyShareCertificateManager:
-  std::vector<nearby::sharing::proto::PublicCertificate>
-  GetPrivateCertificatesAsPublicCertificates(
-      proto::DeviceVisibility visibility) override;
   void GetDecryptedPublicCertificate(
       NearbyShareEncryptedMetadataKey encrypted_metadata_key,
       CertDecryptedCallback callback) override;
   void DownloadPublicCertificates() override;
-  void PrivateCertificateRefresh(bool force_upload) override {};
+  void ForceUploadPrivateCertificates() override {};
   void ClearPublicCertificates(std::function<void(bool)> callback) override;
   void SetVendorId(int32_t vendor_id) override {}
   std::string Dump() const override { return ""; }
@@ -128,8 +123,8 @@ class FakeNearbyShareCertificateManager : public NearbyShareCertificateManager {
 
  private:
   // NearbyShareCertificateManager:
-  void OnStart() override;
-  void OnStop() override;
+  void OnStartScheduledTasks() override {}
+  void OnStopScheduledTasks() override {}
   std::optional<NearbySharePrivateCertificate> GetValidPrivateCertificate(
       proto::DeviceVisibility visibility) const override;
   void UpdatePrivateCertificateInStorage(

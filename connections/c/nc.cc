@@ -34,7 +34,6 @@
 #include "connections/connection_options.h"
 #include "connections/core.h"
 #include "connections/discovery_options.h"
-#include "connections/implementation/flags/nearby_connections_feature_flags.h"
 #include "connections/listeners.h"
 #include "connections/medium_selector.h"
 #include "connections/out_of_band_connection_metadata.h"
@@ -42,11 +41,19 @@
 #include "connections/payload.h"
 #include "connections/status.h"
 #include "connections/strategy.h"
+#include "internal/analytics/event_logger.h"
+#include "internal/flags/flag.h"
+#include "internal/flags/flag_reader.h"
 #include "internal/flags/nearby_flags.h"
-#include "internal/platform/bluetooth_utils.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/file.h"
 #include "internal/platform/logging.h"
+#include "internal/platform/mac_address.h"
+#include "internal/proto/analytics/connections_log.pb.h"
+#include "sharing/proto/analytics/nearby_sharing_log.pb.h"
+#if TARGET_OS_IOS
+#include "internal/platform/implementation/apple/nearby_logger.h"
+#endif  // TARGET_OS_IOS
 
 namespace nearby::connections {
 class Core;
@@ -55,21 +62,98 @@ class ServiceControllerRouter;
 class OfflineServiceController;
 }  // namespace nearby::connections
 
+namespace {
+class FlagReaderWrapper : public nearby::flags::FlagReader {
+ public:
+  explicit FlagReaderWrapper(READER_CONTEXT context,
+                             NC_PHENOTYPE_FLAG_READER phenotype_flag_reader)
+      : context_(context), phenotype_flag_reader_(phenotype_flag_reader) {}
+
+  bool GetBoolFlag(const nearby::flags::Flag<bool>& flag) override {
+    NC_DATA flag_name = NC_DATA{
+        .size = static_cast<uint64_t>(flag.name().size()),
+        .data = (char*)flag.name().data(),
+    };
+    return phenotype_flag_reader_.get_bool_flag_value(context_, &flag_name,
+                                                      flag.default_value());
+  }
+
+  int64_t GetInt64Flag(const nearby::flags::Flag<int64_t>& flag) override {
+    NC_DATA flag_name = NC_DATA{
+        .size = static_cast<uint64_t>(flag.name().size()),
+        .data = (char*)flag.name().data(),
+    };
+    return phenotype_flag_reader_.get_long_flag_value(context_, &flag_name,
+                                                      flag.default_value());
+  }
+
+  double GetDoubleFlag(const nearby::flags::Flag<double>& flag) override {
+    NC_DATA flag_name = NC_DATA{
+        .size = static_cast<uint64_t>(flag.name().size()),
+        .data = (char*)flag.name().data(),
+    };
+    return phenotype_flag_reader_.get_double_flag_value(context_, &flag_name,
+                                                        flag.default_value());
+  }
+
+  std::string GetStringFlag(
+      const nearby::flags::Flag<absl::string_view>& flag) override {
+    NC_DATA flag_name = NC_DATA{
+        .size = static_cast<uint64_t>(flag.name().size()),
+        .data = (char*)flag.name().data(),
+    };
+    NC_DATA default_value = NC_DATA{
+        .size = static_cast<uint64_t>(flag.default_value().size()),
+        .data = (char*)flag.default_value().data(),
+    };
+    NC_DATA flag_value = phenotype_flag_reader_.get_string_flag_value(
+        context_, &flag_name, &default_value);
+    std::string ret = std::string(flag_value.data, flag_value.size);
+    phenotype_flag_reader_.free_string_value(&flag_value);
+    return ret;
+  }
+
+ private:
+  READER_CONTEXT context_;
+  NC_PHENOTYPE_FLAG_READER phenotype_flag_reader_;
+};
+
+// This is a bridging class between the C API and the C++ EventLogger interface.
+class NcEventLogger : public ::nearby::analytics::EventLogger {
+ public:
+  explicit NcEventLogger(const NC_EVENT_LOGGER* event_logger)
+      : event_logger_(event_logger) {}
+
+  void Log(const location::nearby::analytics::proto::ConnectionsLog& message)
+      override {
+    if (event_logger_ == nullptr ||
+        event_logger_->log_connections_event == nullptr) {
+      return;
+    }
+
+    std::string serialized_message = message.SerializeAsString();
+    NC_DATA message_data =
+        NC_DATA{serialized_message.size(), serialized_message.data()};
+    event_logger_->log_connections_event(&message_data);
+  }
+
+  void Log(
+      const nearby::sharing::analytics::proto::SharingLog& message) override {
+    // Do nothing for Nearby Sharing.
+  }
+
+ private:
+  const NC_EVENT_LOGGER* event_logger_;
+};
+}  // namespace
+
 typedef struct NcContext {
   ::nearby::connections::ServiceControllerRouter* router = nullptr;
   ::nearby::connections::Core* core = nullptr;
+  NcEventLogger* event_logger = nullptr;
 } NcContext;
 
 absl::NoDestructor<absl::flat_hash_map<NC_INSTANCE, NcContext>> kNcContextMap;
-
-int64_t getFileSize(const char* filename) {
-  struct stat file_status;
-  if (stat(filename, &file_status) < 0) {
-    return -1;
-  }
-
-  return file_status.st_size;
-}
 
 int convertStringToInt(absl::string_view data) {
   if (data.size() != 4) {
@@ -161,9 +245,22 @@ NcContext* GetContext(NC_INSTANCE instance) {
 }
 
 NC_INSTANCE NcCreateService() {
+  return NcCreateServiceWithEventLogger(nullptr);
+}
+
+NC_INSTANCE
+NcCreateServiceWithEventLogger(const NC_EVENT_LOGGER* event_logger) {
   NcContext nc_context;
+#if TARGET_OS_IOS
+  absl::SetGlobalVLogLevel(1);  // OS_LOG_TYPE_DEBUG
+  ::nearby::apple::EnableOsLog("com.google.nearby.connections");
+#endif  // TARGET_OS_IOS
+
   nc_context.router = new ::nearby::connections::ServiceControllerRouter();
-  nc_context.core = new ::nearby::connections::Core(nc_context.router);
+  nc_context.event_logger =
+      event_logger == nullptr ? nullptr : new NcEventLogger(event_logger);
+  nc_context.core = new ::nearby::connections::Core(nc_context.event_logger,
+                                                    nc_context.router);
 
   kNcContextMap->insert({nc_context.core, nc_context});
   return nc_context.core;
@@ -172,18 +269,20 @@ NC_INSTANCE NcCreateService() {
 void NcCloseService(NC_INSTANCE instance) {
   NcContext* nc_context = GetContext(instance);
   if (nc_context == nullptr) {
-    NEARBY_LOGS(WARNING) << "Trying to close not existent service " << instance;
+    LOG(WARNING) << "Trying to close not existent service " << instance;
     return;
   }
 
   nc_context->core->StopAllEndpoints([](::nearby::connections::Status status) {
-    NEARBY_LOGS(INFO) << "Stopping all endpoints with status "
-                      << status.ToString();
+    LOG(INFO) << "Stopping all endpoints with status " << status.ToString();
   });
 
   kNcContextMap->erase(nc_context->core);
   delete nc_context->router;
   delete nc_context->core;
+  if (nc_context->event_logger != nullptr) {
+    delete nc_context->event_logger;
+  }
 }
 
 void NcStartAdvertising(
@@ -228,6 +327,8 @@ void NcStartAdvertising(
         std::string(advertising_options->fast_advertisement_service_uuid.data,
                     advertising_options->fast_advertisement_service_uuid.size);
   }
+  cpp_advertising_options.allowed.awdl =
+      advertising_options->common_options.allowed_mediums[NC_MEDIUM_AWDL];
 
   cpp_advertising_options.is_out_of_band_connection =
       advertising_options->is_out_of_band_connection;
@@ -319,6 +420,8 @@ void NcStartDiscovery(NC_INSTANCE instance, const NC_DATA* service_id,
       discovery_options->common_options.allowed_mediums[NC_MEDIUM_WIFI_HOTSPOT];
   cpp_discovery_options.allowed.web_rtc =
       discovery_options->common_options.allowed_mediums[NC_MEDIUM_WEB_RTC];
+  cpp_discovery_options.allowed.awdl =
+      discovery_options->common_options.allowed_mediums[NC_MEDIUM_AWDL];
 
   NC_DISCOVERY_LISTENER discovery_listener_copy = *discovery_listener;
   ::nearby::connections::DiscoveryListener listener;
@@ -379,7 +482,7 @@ void NcInjectEndpoint(NC_INSTANCE instance, const NC_DATA* service_id,
   }
 
   ::nearby::connections::OutOfBandConnectionMetadata
-      cpp_out_of_band_connection_metadata;
+      cpp_out_of_band_connection_metadata{};
   cpp_out_of_band_connection_metadata.endpoint_id = metadata->endpoint_id;
   cpp_out_of_band_connection_metadata.endpoint_info = {
       metadata->endpoint_info.data,
@@ -389,6 +492,10 @@ void NcInjectEndpoint(NC_INSTANCE instance, const NC_DATA* service_id,
   cpp_out_of_band_connection_metadata.remote_bluetooth_mac_address = {
       metadata->remote_bluetooth_mac_address.data,
       static_cast<size_t>(metadata->remote_bluetooth_mac_address.size)};
+  cpp_out_of_band_connection_metadata.ble_peripheral_native_id = {
+      metadata->ble_peripheral_native_id.data,
+      static_cast<size_t>(metadata->ble_peripheral_native_id.size)};
+  cpp_out_of_band_connection_metadata.psm = metadata->psm;
 
   nc_context->core->InjectEndpoint(
       std::string(service_id->data, service_id->size),
@@ -413,6 +520,8 @@ void NcRequestConnection(
       GetCppConnectionRequestInfo(instance, *connection_request_info, context);
 
   ::nearby::connections::ConnectionOptions cpp_connection_options;
+  cpp_connection_options.allowed.awdl =
+      connection_options->common_options.allowed_mediums[NC_MEDIUM_AWDL];
   cpp_connection_options.allowed.ble =
       connection_options->common_options.allowed_mediums[NC_MEDIUM_BLE];
   cpp_connection_options.allowed.bluetooth =
@@ -421,6 +530,9 @@ void NcRequestConnection(
       connection_options->common_options.allowed_mediums[NC_MEDIUM_WEB_RTC];
   cpp_connection_options.allowed.wifi_lan =
       connection_options->common_options.allowed_mediums[NC_MEDIUM_WIFI_LAN];
+  cpp_connection_options.allowed.wifi_hotspot =
+      connection_options->common_options
+          .allowed_mediums[NC_MEDIUM_WIFI_HOTSPOT];
   cpp_connection_options.auto_upgrade_bandwidth =
       connection_options->auto_upgrade_bandwidth;
   cpp_connection_options.enforce_topology_constraints =
@@ -438,10 +550,12 @@ void NcRequestConnection(
       connection_options->keep_alive_timeout_millis;
   cpp_connection_options.low_power = connection_options->low_power;
   if (connection_options->remote_bluetooth_mac_address.size > 0) {
-    cpp_connection_options.remote_bluetooth_mac_address =
-        nearby::BluetoothUtils::FromString(
-            std::string(connection_options->remote_bluetooth_mac_address.data,
-                        connection_options->remote_bluetooth_mac_address.size));
+    nearby::MacAddress mac_address;
+    nearby::MacAddress::FromString(
+        std::string(connection_options->remote_bluetooth_mac_address.data,
+                    connection_options->remote_bluetooth_mac_address.size),
+        mac_address);
+    cpp_connection_options.remote_bluetooth_mac_address = mac_address;
   }
   if (connection_options->common_options.strategy.type == NC_STRATEGY_TYPE_NONE)
     cpp_connection_options.strategy = ::nearby::connections::Strategy::kNone;
@@ -570,8 +684,7 @@ void NcSendPayload(NC_INSTANCE instance, size_t endpoint_ids_size,
                                     payload->content.file.file_name);
     }
 
-    nearby::InputFile input_file(full_file_name,
-                                 getFileSize(full_file_name.c_str()));
+    nearby::InputFile input_file(full_file_name);
     cpp_payload =
         ::nearby::connections::Payload(payload->id, std::move(input_file));
   } else if (payload->type == NC_PAYLOAD_TYPE_STREAM) {
@@ -656,10 +769,6 @@ int NcGetLocalEndpointId(NC_INSTANCE instance) {
 
 void NcEnableBleV2(NC_INSTANCE instance, bool enable,
                    NcCallbackResult result_callback, CALLER_CONTEXT context) {
-  nearby::NearbyFlags::GetInstance().OverrideBoolFlagValue(
-      ::nearby::connections::config_package_nearby::nearby_connections_feature::
-          kEnableBleV2,
-      enable);
   result_callback(NC_STATUS_SUCCESS, context);
 }
 
@@ -677,4 +786,11 @@ void NcSetCustomSavePath(NC_INSTANCE instance, const NC_DATA* save_path,
       [=](::nearby::connections::Status status) {
         result_callback(static_cast<NC_STATUS>(status.value), context);
       });
+}
+
+void NcSetPhenotypeFlagReader(READER_CONTEXT context,
+                              NC_PHENOTYPE_FLAG_READER phenotype_flag_reader) {
+  static absl::NoDestructor<FlagReaderWrapper> kNearbyFlags(
+      context, phenotype_flag_reader);
+  nearby::NearbyFlags::GetInstance().SetFlagReader(*kNearbyFlags);
 }

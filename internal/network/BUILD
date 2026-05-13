@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+
 licenses(["notice"])
 
 cc_library(
@@ -56,7 +59,6 @@ cc_library(
         "//internal:__pkg__",
         "//internal:__subpackages__",
         "//location/nearby/cpp/sharing:__subpackages__",
-        "//sharing:__subpackages__",
     ],
     deps = [
         ":url",
@@ -67,6 +69,7 @@ cc_library(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
     ],
 )
 
@@ -84,17 +87,19 @@ cc_library(
     visibility = [
         "//internal:__pkg__",
         "//internal:__subpackages__",
-        "//sharing:__subpackages__",
     ],
     deps = [
         ":types",
+        "//internal/platform:logging",
         "//internal/platform:types",
         "//internal/platform/implementation:comm",
+        "//internal/platform/implementation:platform",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
     ],
 )
 

@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
 cc_library(
     name = "authentication_transport_interface",
     hdrs = [
@@ -33,7 +35,7 @@ cc_library(
     ],
     visibility = [
         "//connections:__subpackages__",
-        "//presence:__subpackages__",
+        "//third_party/nearby/presence:__subpackages__",
     ],
     deps = [
         ":authentication_status",
@@ -52,8 +54,8 @@ cc_library(
     ],
     visibility = [
         "//connections:__subpackages__",
-        "//presence:__subpackages__",
         "//sharing:__subpackages__",
+        "//third_party/nearby/presence:__subpackages__",
     ],
 )
 
@@ -68,7 +70,7 @@ cc_library(
     ],
     compatible_with = ["//buildenv/target:non_prod"],
     visibility = [
-        "//presence:__subpackages__",
+        "//third_party/nearby/presence:__subpackages__",
     ],
     deps = [
         ":authentication_status",

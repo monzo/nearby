@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2025 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,12 +23,9 @@
 #include "connections/implementation/client_proxy.h"
 #include "connections/implementation/endpoint_channel.h"
 #include "connections/implementation/mediums/mediums.h"
-#include "connections/implementation/mediums/wifi.h"
 #include "connections/implementation/mediums/wifi_direct.h"
-#include "internal/platform/byte_array.h"
 #include "internal/platform/expected.h"
 #include "internal/platform/wifi_direct.h"
-#include "utility"
 
 namespace nearby {
 namespace connections {
@@ -61,11 +58,11 @@ class WifiDirectBwuHandler : public BaseBwuHandler {
   // WFD protocol to established connection while WINRT follow the standard WFD
   // spec to achieve the connection. So return fail to stop the upgrade request
   // from phone side.
-  ErrorOr<std::unique_ptr<EndpointChannel>>
-  CreateUpgradedEndpointChannel(ClientProxy* client,
-                                const std::string& service_id,
-                                const std::string& endpoint_id,
-                                const UpgradePathInfo& upgrade_path_info) final;
+  ErrorOr<std::unique_ptr<EndpointChannel>> CreateUpgradedEndpointChannel(
+      ClientProxy* client, const std::string& service_id,
+      const std::string& endpoint_id,
+      const location::nearby::connections::BandwidthUpgradeNegotiationFrame::
+          UpgradePathInfo& upgrade_path_info) final;
   location::nearby::proto::connections::Medium GetUpgradeMedium() const final {
     return location::nearby::proto::connections::Medium::WIFI_DIRECT;
   }
@@ -75,7 +72,7 @@ class WifiDirectBwuHandler : public BaseBwuHandler {
   // Called by BWU initiator. Set up WifiDirect upgraded medium for this
   // endpoint, and returns a upgrade path info (SSID, Password, Gateway used as
   // IPAddress, Port) for remote party to perform connection.
-  ByteArray HandleInitializeUpgradedMediumForEndpoint(
+  std::string HandleInitializeUpgradedMediumForEndpoint(
       ClientProxy* client, const std::string& upgrade_service_id,
       const std::string& endpoint_id) final;
 
@@ -89,7 +86,6 @@ class WifiDirectBwuHandler : public BaseBwuHandler {
                                       WifiDirectSocket socket);
 
   Mediums& mediums_;
-  Wifi& wifi_medium_ = mediums_.GetWifi();
   WifiDirect& wifi_direct_medium_ = mediums_.GetWifiDirect();
 };
 

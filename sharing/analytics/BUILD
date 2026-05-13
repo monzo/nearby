@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+
 licenses(["notice"])
 
 cc_library(
@@ -37,7 +40,6 @@ cc_library(
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/time",
         "@com_google_protobuf//:protobuf",
-        "@com_google_protobuf//:protobuf_lite",
     ],
 )
 
@@ -47,7 +49,7 @@ cc_test(
     deps = [
         ":analytics",
         "//internal/analytics:mock_event_logger",
-        "//internal/platform/implementation/g3",  # fixdeps: keep
+        "//internal/platform/implementation:platform_impl",
         "//proto:sharing_enums_cc_proto",
         "//sharing:attachments",
         "//sharing:types",

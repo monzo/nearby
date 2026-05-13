@@ -31,31 +31,36 @@ namespace nearby_connections_feature {
 // The timeout in millis to report peripheral device lost.
 constexpr auto kBlePeripheralLostTimeoutMillis =
     flags::Flag<int64_t>(kConfigPackage, "45411439", 12000);
-// When true, disable Bluetooth classic scanning.
-constexpr auto kDisableBluetoothClassicScanning =
-    flags::Flag<bool>(kConfigPackage, "45639961", false);
-// Enable/Disable auto_reconnect feature.
-constexpr auto kEnableAutoReconnect =
-    flags::Flag<bool>(kConfigPackage, "45427690", false);
-// Disable/Enable BLE v2 in Nearby Connections SDK.
-constexpr auto kEnableBleV2 =
-    flags::Flag<bool>(kConfigPackage, "45401515", false);
-// Disable/Enable GATT query in thread in BLE V2.
-// Manual edit: setting this to false for ChromeOS rollout as well.
-constexpr auto kEnableGattQueryInThread =
-    flags::Flag<bool>(kConfigPackage, "45415261", false);
-// When true, enable instant on lost feature.
-constexpr auto kEnableInstantOnLost =
-    flags::Flag<bool>(kConfigPackage, "45642180", false);
-// When true, enable multiplexing in NC.
-constexpr auto kEnableMultiplex =
-    flags::Flag<bool>(kConfigPackage, "45647946", false);
+// When true, enable advertising for instant on lost feature.
+constexpr auto kEnableAdvertisingForInstantOnLost =
+    flags::Flag<bool>(kConfigPackage, "45708614", true);
+// Enable/Disable AWDL in Nearby connections SDK.
+constexpr auto kEnableAwdl =
+    flags::Flag<bool>(kConfigPackage, "45690762", false);
+// Disable/Enable BLE L2CAP in Nearby Connections SDK.
+constexpr auto kEnableBleL2cap =
+    flags::Flag<bool>(kConfigPackage, "45685706", false);
+// Enable/Disable BLE medium injection.
+constexpr auto kEnableBleMediumInjection =
+    flags::Flag<bool>(kConfigPackage, "45743128", false);
+// Enable/Disable DCT advertising/scanning specification.
+constexpr auto kEnableDct =
+    flags::Flag<bool>(kConfigPackage, "45697202", false);
+// Disable/Enable dynamic role switch in Nearby Connections SDK.
+constexpr auto kEnableDynamicRoleSwitch =
+    flags::Flag<bool>(kConfigPackage, "45696452", false);
+// Enable/Disable GATT client disconnection.
+constexpr auto kEnableGattClientDisconnection =
+    flags::Flag<bool>(kConfigPackage, "45698964", false);
 // When true, enable multiplexing in NC for Bluetooth.
 constexpr auto kEnableMultiplexBluetooth =
     flags::Flag<bool>(kConfigPackage, "45676646", false);
-// When true, enable multiplexing in NC for WifiLan.
+// When true, enable multiplexing in NC for Wifi.
 constexpr auto kEnableMultiplexWifiLan =
     flags::Flag<bool>(kConfigPackage, "45676647", false);
+// Enable/Disable preferences for Nearby Connections.
+constexpr auto kEnableNearbyConnectionsPreferences =
+    flags::Flag<bool>(kConfigPackage, "45732423", false);
 // Enable/Disable payload manager to skip chunk update.
 constexpr auto kEnablePayloadManagerToSkipChunkUpdate =
     flags::Flag<bool>(kConfigPackage, "45415729", true);
@@ -65,6 +70,16 @@ constexpr auto kEnablePayloadReceivedAck =
 // Enable/Disable safe-to-disconnect feature.
 constexpr auto kEnableSafeToDisconnect =
     flags::Flag<bool>(kConfigPackage, "45425789", false);
+// Enable/Disable usage of shared CBPeripheralManager for GATT and L2CAP
+// servers.
+constexpr auto kEnableSharedPeripheralManager =
+    flags::Flag<bool>(kConfigPackage, "45770787", false);
+// Stop BLE_V2 scanning when upgrading to WIFI Hotspot or WFD.
+constexpr auto kEnableStopBleScanningOnWifiUpgrade =
+    flags::Flag<bool>(kConfigPackage, "45687902", false);
+// Enable/Disable Wi-Fi Direct in Nearby connections SDK.
+constexpr auto kEnableWifiDirect =
+    flags::Flag<bool>(kConfigPackage, "45741157", false);
 // by default, enable Wi-Fi Hotspot client.
 constexpr auto kEnableWifiHotspotClient =
     flags::Flag<bool>(kConfigPackage, "45648734", true);
@@ -74,15 +89,21 @@ constexpr auto kMediumDefaultMaxTransmitPacketSize =
 // Default max allowed read bytes for medium.
 constexpr auto kMediumMaxAllowedReadBytes =
     flags::Flag<int64_t>(kConfigPackage, "45669530", 1048576);
-// Enable/Disable payload-received-ack feature.
+// Disable/Enable refactor of BLE/L2CAP in Nearby Connections SDK.
+constexpr auto kRefactorBleL2cap =
+    flags::Flag<bool>(kConfigPackage, "45737079", false);
 // Set the safe-to-disconnect version.
-// Enable 1. safe-to-disconnect check 2. reserved 3. auto-reconnect 4.
-// auto-resume 5. non-distance-constraint-recovery 6. payload_ack
+// 0. Disabled all. 1. safe-to-disconnect 2. reserved 3.
+// auto-reconnect(deprecated)
+// 4. auto-resume  5. non-distance-constraint-recovery 6. payload_ack
 constexpr auto kSafeToDisconnectVersion =
     flags::Flag<int64_t>(kConfigPackage, "45425841", 0);
-// When true, use stable endpoint ID.
-constexpr auto kUseStableEndpointId =
-    flags::Flag<bool>(kConfigPackage, "45639298", false);
+// Enable/Disable single copy read/write for input/output buffers.
+constexpr auto kEnableSingleCopy =
+    flags::Flag<bool>(kConfigPackage, "45782646", true);
+// When true, fix the BleServerSocket deadlock/use-after-free (b/494335036).
+constexpr auto kFixBleServerSocketDeadlock =
+    flags::Flag<bool>(kConfigPackage, "45782647", true);
 
 }  // namespace nearby_connections_feature
 }  // namespace config_package_nearby

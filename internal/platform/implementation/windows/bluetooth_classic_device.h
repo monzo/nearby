@@ -26,6 +26,7 @@
 #include "internal/platform/implementation/windows/generated/winrt/Windows.Devices.Enumeration.h"
 #include "internal/platform/implementation/windows/generated/winrt/base.h"
 #include "internal/platform/input_stream.h"
+#include "internal/platform/mac_address.h"
 #include "internal/platform/output_stream.h"
 
 namespace nearby {
@@ -56,7 +57,7 @@ using winrt::Windows::Devices::Bluetooth::BluetoothCacheMode;
 // https://developer.android.com/reference/android/bluetooth/BluetoothDevice.html.
 class BluetoothDevice : public api::BluetoothDevice {
  public:
-  explicit BluetoothDevice(absl::string_view mac_address);
+  explicit BluetoothDevice(MacAddress mac_address);
   explicit BluetoothDevice(
       const winrt::Windows::Devices::Bluetooth::BluetoothDevice&
           bluetoothDevice);
@@ -69,7 +70,7 @@ class BluetoothDevice : public api::BluetoothDevice {
   std::string GetName() const override { return name_; }
 
   // Returns BT MAC address assigned to this device.
-  std::string GetMacAddress() const override;
+  MacAddress GetMacAddress() const override;
 
   std::string GetId() { return id_; }
 
@@ -93,7 +94,7 @@ class BluetoothDevice : public api::BluetoothDevice {
   std::string name_;
 
   // Once the device is lost, we can no longer access it's mac address.
-  std::string mac_address_;
+  MacAddress mac_address_;
 };
 
 }  // namespace windows

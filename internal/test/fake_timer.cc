@@ -36,9 +36,9 @@ bool FakeTimer::Start(int delay, int period,
   return InternalStart(delay, period, std::move(callback));
 }
 
-bool FakeTimer::Stop() {
+void FakeTimer::Stop() {
   MutexLock lock(&mutex_);
-  return InternalStop();
+  InternalStop();
 }
 
 bool FakeTimer::IsRunning() {
@@ -84,15 +84,6 @@ void FakeTimer::ClockUpdated() {
   timer_data_ = timer_data;
 }
 
-bool FakeTimer::FireNow() {
-  if (IsRunning()) {
-    timer_data_.callback();
-    return true;
-  }
-
-  return false;
-}
-
 bool FakeTimer::InternalStart(int delay, int period,
                               absl::AnyInvocable<void()> callback) {
   if (delay < 0 || period < 0 || callback == nullptr) {
@@ -100,7 +91,7 @@ bool FakeTimer::InternalStart(int delay, int period,
   }
 
   if (!timer_data_.id.empty()) {
-    NEARBY_LOGS(ERROR) << __func__ << ": timer is already running";
+    LOG(ERROR) << __func__ << ": timer is already running";
     return false;
   }
 
@@ -115,13 +106,12 @@ bool FakeTimer::InternalStart(int delay, int period,
   return true;
 }
 
-bool FakeTimer::InternalStop() {
+void FakeTimer::InternalStop() {
   if (timer_data_.id.empty()) {
-    return true;
+    return;
   }
   clock_->RemoveObserver(timer_data_.id);
   timer_data_ = {};
-  return true;
 }
 
 }  // namespace nearby

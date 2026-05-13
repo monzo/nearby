@@ -14,7 +14,6 @@
 
 #include "connections/implementation/encryption_runner.h"
 
-#include <cinttypes>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -22,7 +21,6 @@
 
 #include "securegcm/ukey2_handshake.h"
 #include "absl/strings/ascii.h"
-#include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "connections/implementation/client_proxy.h"
 #include "connections/implementation/endpoint_channel.h"
@@ -70,31 +68,43 @@ bool HandleEncryptionSuccess(const std::string& endpoint_id,
   return true;
 }
 
-void CancelableAlarmRunnable(ClientProxy* client,
-                             const std::string& endpoint_id,
-                             EndpointChannel* endpoint_channel) {
-  NEARBY_LOGS(INFO) << "Timing out encryption for client "
-                    << client->GetClientId()
-                    << " to endpoint_id=" << endpoint_id << " after "
-                    << absl::FormatDuration(kTimeout);
+void CancelableAlarmRunnable(
+    ClientProxy* client, const std::string& endpoint_id,
+    std::shared_ptr<EndpointChannel> endpoint_channel) {
+  LOG(INFO) << "Timing out encryption for client " << client->GetClientId()
+            << " to endpoint_id=" << endpoint_id << " after "
+            << absl::FormatDuration(kTimeout);
   endpoint_channel->Close();
 }
 
 class ServerRunnable final {
  public:
   ServerRunnable(ClientProxy* client, ScheduledExecutor* alarm_executor,
-                 const std::string& endpoint_id, EndpointChannel* channel,
+                 const std::string& endpoint_id,
+                 std::shared_ptr<EndpointChannel> channel,
                  EncryptionRunner::ResultListener listener)
       : client_(client),
         alarm_executor_(alarm_executor),
         endpoint_id_(endpoint_id),
-        channel_(channel),
+        weak_channel_(channel),
         listener_(std::move(listener)) {}
 
   void operator()() {
+    // Lock the weak pointer. If it fails, the channel was freed.
+    auto channel = weak_channel_.lock();
+    // The IsClosed() check is to provide an early exit if channel has been
+    // closed. Otherwise the Read() and Write() calls on the channel below will
+    // return error and exit.
+    if (!channel || channel->IsClosed()) {
+      return;
+    }
     CancelableAlarm timeout_alarm(
         "EncryptionRunner.StartServer() timeout",
-        [this]() { CancelableAlarmRunnable(client_, endpoint_id_, channel_); },
+        [this, weak_channel = weak_channel_]() {
+          if (auto channel = weak_channel.lock()) {
+            CancelableAlarmRunnable(client_, endpoint_id_, channel);
+          }
+        },
         kTimeout, alarm_executor_);
 
     std::unique_ptr<securegcm::UKey2Handshake> server =
@@ -106,7 +116,7 @@ class ServerRunnable final {
     }
 
     // Message 1 (Client Init)
-    ExceptionOr<ByteArray> client_init = channel_->Read();
+    ExceptionOr<ByteArray> client_init = channel->Read();
     if (!client_init.ok()) {
       LogException();
       HandleHandshakeOrIoException(&timeout_alarm);
@@ -120,15 +130,14 @@ class ServerRunnable final {
     if (!parse_result.success) {
       LogException();
       if (parse_result.alert_to_send != nullptr) {
-        HandleAlertException(parse_result);
+        HandleAlertException(parse_result, channel);
       }
       HandleHandshakeOrIoException(&timeout_alarm);
       return;
     }
 
-    NEARBY_LOGS(INFO)
-        << "In StartServer(), read UKEY2 Message 1 from endpoint(id="
-        << endpoint_id_ << ").";
+    LOG(INFO) << "In StartServer(), read UKEY2 Message 1 from endpoint(id="
+              << endpoint_id_ << ").";
 
     // Message 2 (Server Init)
     std::unique_ptr<std::string> server_init =
@@ -141,20 +150,18 @@ class ServerRunnable final {
       return;
     }
 
-    Exception write_exception =
-        channel_->Write(ByteArray(std::move(*server_init)));
+    Exception write_exception = channel->Write(*server_init);
     if (!write_exception.Ok()) {
       LogException();
       HandleHandshakeOrIoException(&timeout_alarm);
       return;
     }
 
-    NEARBY_LOGS(INFO)
-        << "In StartServer(), wrote UKEY2 Message 2 to endpoint(id="
-        << endpoint_id_ << ").";
+    LOG(INFO) << "In StartServer(), wrote UKEY2 Message 2 to endpoint(id="
+              << endpoint_id_ << ").";
 
     // Message 3 (Client Finish)
-    ExceptionOr<ByteArray> client_finish = channel_->Read();
+    ExceptionOr<ByteArray> client_finish = channel->Read();
 
     if (!client_finish.ok()) {
       LogException();
@@ -169,15 +176,14 @@ class ServerRunnable final {
     if (!parse_result.success) {
       LogException();
       if (parse_result.alert_to_send != nullptr) {
-        HandleAlertException(parse_result);
+        HandleAlertException(parse_result, channel);
       }
       HandleHandshakeOrIoException(&timeout_alarm);
       return;
     }
 
-    NEARBY_LOGS(INFO)
-        << "In StartServer(), read UKEY2 Message 3 from endpoint(id="
-        << endpoint_id_ << ").";
+    LOG(INFO) << "In StartServer(), read UKEY2 Message 3 from endpoint(id="
+              << endpoint_id_ << ").";
 
     timeout_alarm.Cancel();
 
@@ -190,49 +196,62 @@ class ServerRunnable final {
 
  private:
   void LogException() const {
-    NEARBY_LOGS(ERROR) << "In StartServer(), UKEY2 failed with endpoint(id="
-                       << endpoint_id_ << ").";
+    LOG(ERROR) << "In StartServer(), UKEY2 failed with endpoint(id="
+               << endpoint_id_ << ").";
   }
 
   void HandleHandshakeOrIoException(CancelableAlarm* timeout_alarm) {
     timeout_alarm->Cancel();
-    listener_.CallFailureCallback(endpoint_id_, channel_);
+    listener_.CallFailureCallback(endpoint_id_);
   }
 
   void HandleAlertException(
-      const securegcm::UKey2Handshake::ParseResult& parse_result) const {
-    Exception write_exception =
-        channel_->Write(ByteArray(*parse_result.alert_to_send));
+      const securegcm::UKey2Handshake::ParseResult& parse_result,
+      std::shared_ptr<EndpointChannel> channel) const {
+    Exception write_exception = channel->Write(*parse_result.alert_to_send);
     if (!write_exception.Ok()) {
-      NEARBY_LOGS(WARNING)
-          << "In StartServer(), client " << client_->GetClientId()
-          << " failed to pass the alert error message to endpoint(id="
-          << endpoint_id_ << ").";
+      LOG(WARNING) << "In StartServer(), client " << client_->GetClientId()
+                   << " failed to pass the alert error message to endpoint(id="
+                   << endpoint_id_ << ").";
     }
   }
 
   ClientProxy* client_;
   ScheduledExecutor* alarm_executor_;
   const std::string endpoint_id_;
-  EndpointChannel* channel_;
+  std::weak_ptr<EndpointChannel> weak_channel_;
   EncryptionRunner::ResultListener listener_;
 };
 
 class ClientRunnable final {
  public:
   ClientRunnable(ClientProxy* client, ScheduledExecutor* alarm_executor,
-                 const std::string& endpoint_id, EndpointChannel* channel,
+                 const std::string& endpoint_id,
+                 std::shared_ptr<EndpointChannel> channel,
                  EncryptionRunner::ResultListener listener)
       : client_(client),
         alarm_executor_(alarm_executor),
         endpoint_id_(endpoint_id),
-        channel_(channel),
+        weak_channel_(channel),
         listener_(std::move(listener)) {}
 
   void operator()() {
+    // Lock the weak pointer. If it fails, the channel was freed.
+    auto channel = weak_channel_.lock();
+    // The IsClosed() check is to provide an early exit if channel has been
+    // closed. Otherwise the Read() and Write() calls on the channel below will
+    // return error and exit.
+    if (!channel || channel->IsClosed()) {
+      return;
+    }
+
     CancelableAlarm timeout_alarm(
         "EncryptionRunner.StartClient() timeout",
-        [this]() { CancelableAlarmRunnable(client_, endpoint_id_, channel_); },
+        [this, weak_channel = weak_channel_]() {
+          if (auto channel = weak_channel.lock()) {
+            CancelableAlarmRunnable(client_, endpoint_id_, channel);
+          }
+        },
         kTimeout, alarm_executor_);
 
     std::unique_ptr<securegcm::UKey2Handshake> crypto =
@@ -256,19 +275,18 @@ class ClientRunnable final {
       return;
     }
 
-    Exception write_init_exception = channel_->Write(ByteArray(*client_init));
+    Exception write_init_exception = channel->Write(*client_init);
     if (!write_init_exception.Ok()) {
       LogException();
       HandleHandshakeOrIoException(&timeout_alarm);
       return;
     }
 
-    NEARBY_LOGS(INFO)
-        << "In StartClient(), wrote UKEY2 Message 1 to endpoint(id="
-        << endpoint_id_ << ").";
+    LOG(INFO) << "In StartClient(), wrote UKEY2 Message 1 to endpoint(id="
+              << endpoint_id_ << ").";
 
     // Message 2 (Server Init)
-    ExceptionOr<ByteArray> server_init = channel_->Read();
+    ExceptionOr<ByteArray> server_init = channel->Read();
 
     if (!server_init.ok()) {
       LogException();
@@ -283,15 +301,14 @@ class ClientRunnable final {
     if (!parse_result.success) {
       LogException();
       if (parse_result.alert_to_send != nullptr) {
-        HandleAlertException(parse_result);
+        HandleAlertException(parse_result, channel);
       }
       HandleHandshakeOrIoException(&timeout_alarm);
       return;
     }
 
-    NEARBY_LOGS(INFO)
-        << "In StartClient(), read UKEY2 Message 2 from endpoint(id="
-        << endpoint_id_ << ").";
+    LOG(INFO) << "In StartClient(), read UKEY2 Message 2 from endpoint(id="
+              << endpoint_id_ << ").";
 
     // Message 3 (Client Finish)
     std::unique_ptr<std::string> client_finish =
@@ -304,17 +321,15 @@ class ClientRunnable final {
       return;
     }
 
-    Exception write_finish_exception =
-        channel_->Write(ByteArray(*client_finish));
+    Exception write_finish_exception = channel->Write(*client_finish);
     if (!write_finish_exception.Ok()) {
       LogException();
       HandleHandshakeOrIoException(&timeout_alarm);
       return;
     }
 
-    NEARBY_LOGS(INFO)
-        << "In StartClient(), wrote UKEY2 Message 3 to endpoint(id="
-        << endpoint_id_ << ").";
+    LOG(INFO) << "In StartClient(), wrote UKEY2 Message 3 to endpoint(id="
+              << endpoint_id_ << ").";
 
     timeout_alarm.Cancel();
 
@@ -327,31 +342,30 @@ class ClientRunnable final {
 
  private:
   void LogException() const {
-    NEARBY_LOGS(ERROR) << "In StartClient(), UKEY2 failed with endpoint(id="
-                       << endpoint_id_ << ").";
+    LOG(ERROR) << "In StartClient(), UKEY2 failed with endpoint(id="
+               << endpoint_id_ << ").";
   }
 
   void HandleHandshakeOrIoException(CancelableAlarm* timeout_alarm) {
     timeout_alarm->Cancel();
-    listener_.CallFailureCallback(endpoint_id_, channel_);
+    listener_.CallFailureCallback(endpoint_id_);
   }
 
   void HandleAlertException(
-      const securegcm::UKey2Handshake::ParseResult& parse_result) const {
-    Exception write_exception =
-        channel_->Write(ByteArray(*parse_result.alert_to_send));
+      const securegcm::UKey2Handshake::ParseResult& parse_result,
+      std::shared_ptr<EndpointChannel> channel) const {
+    Exception write_exception = channel->Write(*parse_result.alert_to_send);
     if (!write_exception.Ok()) {
-      NEARBY_LOGS(WARNING)
-          << "In StartClient(), client " << client_->GetClientId()
-          << " failed to pass the alert error message to endpoint(id="
-          << endpoint_id_ << ").";
+      LOG(WARNING) << "In StartClient(), client " << client_->GetClientId()
+                   << " failed to pass the alert error message to endpoint(id="
+                   << endpoint_id_ << ").";
     }
   }
 
   ClientProxy* client_;
   ScheduledExecutor* alarm_executor_;
   const std::string endpoint_id_;
-  EndpointChannel* channel_;
+  std::weak_ptr<EndpointChannel> weak_channel_;
   EncryptionRunner::ResultListener listener_;
 };
 
@@ -359,19 +373,19 @@ class ClientRunnable final {
 
 EncryptionRunner::~EncryptionRunner() { Shutdown(); }
 
-void EncryptionRunner::StartServer(ClientProxy* client,
-                                   const std::string& endpoint_id,
-                                   EndpointChannel* endpoint_channel,
-                                   EncryptionRunner::ResultListener listener) {
+void EncryptionRunner::StartServer(
+    ClientProxy* client, const std::string& endpoint_id,
+    std::shared_ptr<EndpointChannel> endpoint_channel,
+    EncryptionRunner::ResultListener listener) {
   ServerRunnable runnable(client, &alarm_executor_, endpoint_id,
                           endpoint_channel, std::move(listener));
   server_executor_.Execute("encryption-server", std::move(runnable));
 }
 
-void EncryptionRunner::StartClient(ClientProxy* client,
-                                   const std::string& endpoint_id,
-                                   EndpointChannel* endpoint_channel,
-                                   EncryptionRunner::ResultListener listener) {
+void EncryptionRunner::StartClient(
+    ClientProxy* client, const std::string& endpoint_id,
+    std::shared_ptr<EndpointChannel> endpoint_channel,
+    EncryptionRunner::ResultListener listener) {
   ClientRunnable runnable(client, &alarm_executor_, endpoint_id,
                           endpoint_channel, std::move(listener));
   client_executor_.Execute("encryption-client", std::move(runnable));
@@ -400,9 +414,9 @@ void EncryptionRunner::ResultListener::CallSuccessCallback(
 }
 
 void EncryptionRunner::ResultListener::CallFailureCallback(
-    const std::string& endpoint_id, EndpointChannel* channel) {
+    const std::string& endpoint_id) {
   if (on_failure_cb) {
-    std::move(on_failure_cb)(endpoint_id, channel);
+    std::move(on_failure_cb)(endpoint_id);
   }
   Reset();
 }

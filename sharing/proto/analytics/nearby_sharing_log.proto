@@ -18,11 +18,10 @@ package nearby.sharing.analytics.proto;
 
 import "google/protobuf/duration.proto";
 
+// "privacy/pattributes/annotations/proto_field.proto";
 // import "storage/datapol/annotations/proto/semantic_annotations.proto";
 // import "storage/googlesql/public/proto/type_annotation.proto";
 import "proto/sharing_enums.proto";
-
-// "wireless/android/privacy/annotations/proto/collection_basis_annotations.proto";
 
 option optimize_for = LITE_RUNTIME;
 option java_package = "nearby.sharing.analytics.proto";
@@ -31,12 +30,13 @@ option objc_class_prefix = "GNCP";
 
 // Top-level log proto for all NearbySharing logging.
 // Each log contains a key (event_type), value (a verb-noun event) pair.
-// Next Tag: 83
+// Next Tag: 90
 // LINT.IfChange
 message SharingLog {
-  /* collection_basis = {
-    use_cases: UC_SERVICE_OR_API_MEASURING_USER_ENGAGEMENT
-  } */
+  /* justification = {
+      collection_basis: CB_CHECKBOX
+      purposes: [ INFRASTRUCTURE_METRICS, BUSINESS_ANALYSIS ]
+    } */
 
   reserved 71;  // Deprecated TransferUIEvent.
 
@@ -221,6 +221,26 @@ message SharingLog {
   optional HatsJointEvent hats_joint_event = 81;
 
   optional ReceivePreviews receive_previews = 82;
+
+  // Two types of QR code sharing: P2P and Cloud-based
+  // P2P QR code flow re-uses a lot of the existing events from scan to send.
+  // Cloud-based QR code flow has the following new events.
+  // QR code events for sender side.
+  optional CloudCreateSharingRequest cloud_create_sharing_request = 83;
+
+  // QR code CLOUD_REGISTER_RECEIVER event for receiver side.
+  optional CloudRegisterReceiver cloud_register_receiver = 84;
+
+  optional CloudUploadStart cloud_upload_start = 85;
+
+  optional CloudUploadEnd cloud_upload_end = 86;
+
+  optional CloudDownloadStart cloud_download_start = 87;
+
+  optional CloudDownloadEnd cloud_download_end = 88;
+
+  // Cloud sharing RPC call event.
+  optional CloudSharingRpcResult cloud_sharing_rpc_result = 89;
 
   // Used only for Nearby Share Windows app now.
   message AppInfo {
@@ -454,6 +474,25 @@ message SharingLog {
     // reconstruct particular user's activity pattern.
     optional int64 session_id = 6 /* type = ST_SESSION_ID */;
     optional int32 vendor_id = 7 /* type = ST_PARTNER_ID */;
+
+    // The cloud_sharing_id: used by both sender and receiver during QR code
+    // cloud sharing flow to join sender and receiver events.
+    optional string cloud_sharing_id = 8
+        /* type = ST_SESSION_ID */;
+    // receiver session id: used by QR code cloud receiver.
+    optional string cloud_receiver_session_id = 9
+        /* type = ST_SESSION_ID */;
+
+    // The name of the external provider, it will not be set if the provider is
+    // not external.
+    optional string external_provider_name = 10;
+    // The service id of the external provider, it will not be set if the
+    // provider is not external.
+    optional string external_provider_id = 11
+        /* type = ST_SESSION_ID */;
+    // Is this file transfer from a direct share target. This is only available
+    // for the sender log.
+    optional bool is_direct_share = 12;
   }
 
   // TODO(fdi): may consider adding a field about decipherability later.
@@ -472,6 +511,10 @@ message SharingLog {
     // directly engage with NS to send.
     optional int64 latency_since_activity_start_millis = 6 [default = -1];
     optional location.nearby.proto.sharing.ScanType scan_type = 7;
+
+    // receiver session id: used by QR code cloud receiver.
+    optional string cloud_receiver_session_id = 8
+        /* type = ST_SESSION_ID */;
   }
 
   // EventType: PARSING_FAILED_ENDPOINT_ID
@@ -499,6 +542,9 @@ message SharingLog {
   // EventType: DESCRIBE_ATTACHMENTS
   message DescribeAttachments {
     optional AttachmentsInfo attachments_info = 1;
+
+    // Time taken to download the attachments before sending
+    optional google.protobuf.Duration download_duration = 2;
   }
 
   // TODO(fdi): may want to add duration_from_scanning_millis later.
@@ -536,6 +582,12 @@ message SharingLog {
     // Deprecated. Use share_target_info.has_matching_qr_code instead.
     optional bool qr_code_flow = 5 [deprecated = true];
     optional ShareTargetInfo share_target_info = 6;
+    // True if the advanced protection is enabled and the sender needed to
+    // confirm the transfer.
+    optional bool advanced_protection_enabled = 7;
+    // True if the advanced protection flag from NearbyService BE is different
+    // from the mendel flag.
+    optional bool advanced_protection_mismatch = 8;
   }
 
   // EventType: SEND_ATTACHMENTS_END
@@ -569,6 +621,13 @@ message SharingLog {
     // Exact transfer count stored on device, but when logging put the transfer
     // count in buckets, initially we use buckets: 1, 2, 3, …, 10, 11+
     optional int32 lifetime_transfer_count = 13;
+    // The medium used for the connection.
+    optional int32 connection_medium = 14;
+    // The data usage of the user settings.
+    optional location.nearby.proto.sharing.DataUsage data_usage = 15;
+
+    // True if the sender and receiver are mutual contacts.
+    optional bool is_mutual_contact = 16;
   }
 
   // EventType: RECEIVE_ATTACHMENTS_START
@@ -600,6 +659,10 @@ message SharingLog {
     // Exact transfer count stored on device, but when logging put the transfer
     // count in buckets, initially we use buckets: 1, 2, 3, …, 10, 11+
     optional int32 lifetime_transfer_count = 8;
+    // The medium used for the connection.
+    optional int32 connection_medium = 14;
+    // The data usage of the user settings.
+    optional location.nearby.proto.sharing.DataUsage data_usage = 15;
   }
 
   // EventType: CANCEL_CONNECTION
@@ -817,6 +880,9 @@ message SharingLog {
     // this ShareTargetInfo is the one that generated the QR code scanned by
     // this receiver.
     optional bool has_matching_qr_code = 4;
+
+    // Represents whether the share target is from external provider.
+    optional bool is_external = 5;
   }
 
   // The metadata of attachments to be shared.
@@ -828,6 +894,7 @@ message SharingLog {
     repeated WifiCredentialsAttachment wifi_credentials_attachment = 4;
     repeated AppAttachment app_attachment = 5;
     repeated StreamAttachment stream_attachment = 6;
+    repeated FolderAttachment folder_attachment = 7;
   }
 
   message TextAttachment {
@@ -861,6 +928,7 @@ message SharingLog {
       ANDROID_APP = 3;
       AUDIO = 4;
       DOCUMENT = 5;
+      CONTACT_CARD = 6;
     }
   }
 
@@ -886,6 +954,24 @@ message SharingLog {
     optional int64 batch_id = 2 /* type = ST_SESSION_ID */;
     optional location.nearby.proto.sharing.AttachmentSourceType source_type = 3;
   }
+
+  message CloudAttachmentInfo {
+    optional location.nearby.proto.sharing.AttachmentTransmissionStatus status =
+        1;
+    oneof CloudAttachment {
+      TextAttachment text_attachment = 2;
+      FileAttachment file_attachment = 3;
+      WifiCredentialsAttachment wifi_credentials_attachment = 4;
+      AppAttachment app_attachment = 5;
+      StreamAttachment stream_attachment = 6;
+    }
+    // The total bytes of all attachments transferred.
+    optional int64 transferred_bytes = 7;
+    // The duration from transfer start to transfer end.
+    optional int64 duration_millis = 8;
+  }
+
+  message FolderAttachment {}
 
   // EventType: APP_CRASH
   // Used only for Nearby Share Windows App now
@@ -957,6 +1043,10 @@ message SharingLog {
       WINDOWS = 5;
     }
     optional ClientPlatform client_platform = 1;
+
+    // Whether the /qrcode page was opened in the browser again after the user
+    // clicked on the "Try again" button
+    optional bool is_retry = 2;
   }
   // EventType: HATS_JOINT_EVENT
   message HatsJointEvent {
@@ -968,6 +1058,71 @@ message SharingLog {
   // EventType: RECEIVE_PREVIEWS
   message ReceivePreviews {
     optional int32 num_previews = 1;
+  }
+
+  // EventType: CLOUD_CREATE_SHARING_REQUEST
+  message CloudCreateSharingRequest {
+    optional AttachmentsInfo attachments_info = 1;
+    optional location.nearby.proto.sharing.CloudCreateSharingResult result = 2;
+    // Time taken to download attachments from the Intent in milliseconds.
+    optional int64 attachment_download_latency_millis = 3;
+    // Time taken to generate and encrypt the preview thumbnail in milliseconds.
+    optional int64 preview_thumbnail_latency_millis = 4;
+    // Time taken to make the CreateSharing RPC call in milliseconds.
+    optional int64 rpc_latency_millis = 5;
+  }
+
+  // EventType: CLOUD_REGISTER_RECEIVER used by QR code cloud web receiver
+  message CloudRegisterReceiver {
+    optional location.nearby.proto.sharing.CloudRegisterReceiverResult result =
+        1;
+  }
+
+  // EventType: CLOUD_UPLOAD_START used by QR code cloud web sender
+  // The cloud_sharing_id and flow_id are logged in the event metadata.
+  message CloudUploadStart {
+    optional AttachmentsInfo attachments_info = 1;
+    optional location.nearby.proto.sharing.CloudActionType action_type = 2;
+  }
+
+  // EventType: CLOUD_UPLOAD_END used by QR code cloud web sender
+  // The cloud_sharing_id and flow_id are logged in the event metadata.
+  message CloudUploadEnd {
+    repeated CloudAttachmentInfo upload_infos = 1;
+    optional location.nearby.proto.sharing.CloudActionType action_type = 2;
+  }
+
+  // EventType: CLOUD_DOWNLOAD_START used by QR code cloud web receiver
+  // The cloud_sharing_id and cloud_receiver_session_id are logged in the
+  // event_metadata into the anonymous logs.
+  message CloudDownloadStart {
+    optional AttachmentsInfo attachments_info = 1;
+    optional location.nearby.proto.sharing.CloudActionType action_type = 2;
+  }
+
+  // EventType: CLOUD_DOWNLOAD_END used by QR code cloud web receiver
+  // The cloud_sharing_id and cloud_receiver_session_id are logged in the
+  // event_metadata into the anonymous logs.
+  message CloudDownloadEnd {
+    repeated CloudAttachmentInfo download_infos = 1;
+    optional location.nearby.proto.sharing.CloudActionType action_type = 2;
+  }
+
+  // EventType: CLOUD_SHARING_RPC_RESULT
+  // Event logging the result of a Cloud Sharing RPC call. This event captures
+  // the type of RPC, its outcome, and performance metrics.
+  message CloudSharingRpcResult {
+    // The specific RPC method that was called.
+    optional string rpc_name = 1;
+    // The canonical gRPC status code (io.grpc.Status.Code) resulting from the
+    // call.
+    optional int32 status_code = 2;
+    // The total time taken for the RPC call to complete, in milliseconds.
+    optional int64 latency_millis = 3;
+    // The unique identifier for the cloud sharing session, if available at the
+    // time of the call. This helps correlate RPC events to a specific sharing
+    // session.
+    optional string cloud_sharing_id = 4;
   }
 }
 // LINT.ThenChange(//depot/google3/logs/proto/location/nearby/nearby_client_log.proto)

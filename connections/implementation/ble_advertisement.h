@@ -14,12 +14,16 @@
 
 #ifndef CORE_INTERNAL_BLE_ADVERTISEMENT_H_
 #define CORE_INTERNAL_BLE_ADVERTISEMENT_H_
+#include <string>
 
 #include "absl/status/statusor.h"
-#include "connections/implementation/base_pcp_handler.h"
+#include "absl/strings/escaping.h"
+#include "absl/strings/str_format.h"
 #include "connections/implementation/pcp.h"
+#include "connections/implementation/webrtc_state.h"
 #include "internal/platform/bluetooth_utils.h"
 #include "internal/platform/byte_array.h"
+#include "internal/platform/mac_address.h"
 
 namespace nearby {
 namespace connections {
@@ -76,7 +80,7 @@ class BleAdvertisement {
   BleAdvertisement(Version version, Pcp pcp, const ByteArray& service_id_hash,
                    const std::string& endpoint_id,
                    const ByteArray& endpoint_info,
-                   const std::string& bluetooth_mac_address,
+                   MacAddress bluetooth_mac_address,
                    const ByteArray& uwb_address, WebRtcState web_rtc_state);
   static absl::StatusOr<BleAdvertisement> CreateBleAdvertisement(
       bool fast_advertisement, const ByteArray& ble_advertisement_bytes);
@@ -95,16 +99,24 @@ class BleAdvertisement {
   ByteArray GetServiceIdHash() const { return service_id_hash_; }
   std::string GetEndpointId() const { return endpoint_id_; }
   ByteArray GetEndpointInfo() const { return endpoint_info_; }
-  std::string GetBluetoothMacAddress() const { return bluetooth_mac_address_; }
+  MacAddress GetBluetoothMacAddress() const { return bluetooth_mac_address_; }
   ByteArray GetUwbAddress() const { return uwb_address_; }
   WebRtcState GetWebRtcState() const { return web_rtc_state_; }
+  std::string ToReadableString() const {
+    return absl::StrFormat(
+        "BleAdvertisement { version=%d, pcp=%d, fast_advertisement=%v, "
+        "service_id_hash=%s, endpoint_id=%s, endpoint_info_=%s}",
+        static_cast<int>(version_), static_cast<int>(pcp_), fast_advertisement_,
+        absl::BytesToHexString(service_id_hash_.AsStringView()), endpoint_id_,
+        absl::BytesToHexString(endpoint_info_.AsStringView()));
+  }
 
  private:
   void DoInitialize(bool fast_advertisement, Version version, Pcp pcp,
                     const ByteArray& service_id_hash,
                     const std::string& endpoint_id,
                     const ByteArray& endpoint_info,
-                    const std::string& bluetooth_mac_address,
+                    MacAddress bluetooth_mac_address,
                     const ByteArray& uwb_address, WebRtcState web_rtc_state);
 
   bool fast_advertisement_ = false;
@@ -113,7 +125,7 @@ class BleAdvertisement {
   ByteArray service_id_hash_;
   std::string endpoint_id_;
   ByteArray endpoint_info_;
-  std::string bluetooth_mac_address_;
+  MacAddress bluetooth_mac_address_;
   // TODO(b/169550050): Define UWB address field.
   ByteArray uwb_address_;
   WebRtcState web_rtc_state_{WebRtcState::kUndefined};

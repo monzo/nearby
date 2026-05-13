@@ -87,8 +87,8 @@ class ConnectionFlow : public webrtc::PeerConnectionObserver {
   };
 
   struct AdapterTypeListener {
-    absl::AnyInvocable<void(rtc::AdapterType adapter_type)>
-        adapter_type_changed_cb = DefaultCallback<rtc::AdapterType>();
+    absl::AnyInvocable<void(webrtc::AdapterType adapter_type)>
+        adapter_type_changed_cb = DefaultCallback<webrtc::AdapterType>();
   };
 
   // This method blocks on the creation of the peer connection object.
@@ -128,29 +128,29 @@ class ConnectionFlow : public webrtc::PeerConnectionObserver {
   // ice candidate to the peer connection if ready or cache it otherwise.
   // Can be called on any thread but never called on signaling thread.
   bool OnRemoteIceCandidatesReceived(
-      std::vector<std::unique_ptr<webrtc::IceCandidateInterface>>
-          ice_candidates) ABSL_LOCKS_EXCLUDED(mutex_);
+      std::vector<std::unique_ptr<webrtc::IceCandidate>> ice_candidates)
+      ABSL_LOCKS_EXCLUDED(mutex_);
   // Close the peer connection and data channel if not connected.
   // Can be called on any thread but never called on signaling thread.
   bool CloseIfNotConnected() ABSL_LOCKS_EXCLUDED(mutex_);
 
   // webrtc::PeerConnectionObserver:
   // All methods called only on signaling thread.
-  void OnIceCandidate(const webrtc::IceCandidateInterface* candidate) override;
+  void OnIceCandidate(const webrtc::IceCandidate* candidate) override;
   void OnSignalingChange(
       webrtc::PeerConnectionInterface::SignalingState new_state) override;
-  void OnDataChannel(
-      rtc::scoped_refptr<webrtc::DataChannelInterface> data_channel) override;
+  void OnDataChannel(webrtc::scoped_refptr<webrtc::DataChannelInterface>
+                         data_channel) override;
   void OnIceGatheringChange(
       webrtc::PeerConnectionInterface::IceGatheringState new_state) override;
   void OnConnectionChange(
       webrtc::PeerConnectionInterface::PeerConnectionState new_state) override;
   void OnRenegotiationNeeded() override;
   void OnIceSelectedCandidatePairChanged(
-      const cricket::CandidatePairChangeEvent& event) override;
+      const webrtc::CandidatePairChangeEvent& event) override;
 
   // Public because it's used in tests too.
-  rtc::scoped_refptr<webrtc::PeerConnectionInterface> GetPeerConnection();
+  webrtc::scoped_refptr<webrtc::PeerConnectionInterface> GetPeerConnection();
 
  private:
   ConnectionFlow(LocalIceCandidateListener local_ice_candidate_listener,
@@ -158,20 +158,19 @@ class ConnectionFlow : public webrtc::PeerConnectionObserver {
                  AdapterTypeListener adapter_type_listener);
 
   // Resets peer connection reference. Returns old value.
-  rtc::scoped_refptr<webrtc::PeerConnectionInterface>
+  webrtc::scoped_refptr<webrtc::PeerConnectionInterface>
   GetAndResetPeerConnection();
   void CreateOfferOnSignalingThread(
       Future<SessionDescriptionWrapper> success_future);
   void CreateAnswerOnSignalingThread(
       Future<SessionDescriptionWrapper> success_future);
   void AddIceCandidatesOnSignalingThread(
-      std::vector<std::unique_ptr<webrtc::IceCandidateInterface>>
-          ice_candidates);
+      std::vector<std::unique_ptr<webrtc::IceCandidate>> ice_candidates);
   // Invoked when the peer connection indicates that signaling is stable.
   void OnSignalingStable() ABSL_LOCKS_EXCLUDED(mutex_);
 
   void CreateSocketFromDataChannel(
-      rtc::scoped_refptr<webrtc::DataChannelInterface> data_channel);
+      webrtc::scoped_refptr<webrtc::DataChannelInterface> data_channel);
 
   // TODO(bfranz): Consider whether this needs to be configurable per platform
   static constexpr absl::Duration kTimeout = absl::Milliseconds(250);
@@ -218,14 +217,14 @@ class ConnectionFlow : public webrtc::PeerConnectionObserver {
   // because it allows us to do state management on the signaling thread too,
   // simplifies locking, and we don't have to block the current thread for every
   // peer connection call.
-  rtc::scoped_refptr<webrtc::PeerConnectionInterface> peer_connection_
+  webrtc::scoped_refptr<webrtc::PeerConnectionInterface> peer_connection_
       ABSL_GUARDED_BY(mutex_);
 
   // Used to hold a reference to the WebRtcSocket while the data channel is
   // connecting.
   WebRtcSocketWrapper socket_wrapper_;
 
-  std::vector<std::unique_ptr<webrtc::IceCandidateInterface>>
+  std::vector<std::unique_ptr<webrtc::IceCandidate>>
       cached_remote_ice_candidates_;
   // This pointer is only for DCHECK() assertions.
   // It allows us to check if we are running on signaling thread even
@@ -234,8 +233,8 @@ class ConnectionFlow : public webrtc::PeerConnectionObserver {
   // This shared_ptr is reset on the signaling thread when ConnectionFlow is
   // closed. This prevents us from running tasks on the signaling thread when
   // peer connection is closed. The value stored in |can_run_tasks_| is not
-  // used. We are using std::shared_ptr instead of rtc::WeakPtrFactory because
-  // the former is thread-safe.
+  // used. We are using std::shared_ptr instead of webrtc::WeakPtrFactory
+  // because the former is thread-safe.
   std::shared_ptr<void> can_run_tasks_ = std::make_shared<int>();
 
   AdapterTypeListener adapter_type_listener_;

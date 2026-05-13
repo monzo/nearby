@@ -37,6 +37,7 @@
 #include "internal/platform/input_stream.h"
 #include "internal/platform/listeners.h"
 #include "internal/platform/logging.h"
+#include "internal/platform/mac_address.h"
 #include "internal/platform/mutex.h"
 #include "internal/platform/output_stream.h"
 #include "internal/platform/socket.h"
@@ -83,13 +84,13 @@ class BluetoothSocket : public MediumSocket {
   // Returns Exception::kIo on error, Exception::kSuccess otherwise.
   Exception Close() override {
     if (IsVirtualSocket()) {
-      NEARBY_LOGS(INFO) << "Multiplex: Closing virtual socket: " << this;
+      LOG(INFO) << "Multiplex: Closing virtual socket: " << this;
       blocking_queue_input_stream_->Close();
       virtual_output_stream_->Close();
       CloseLocal();
       return {Exception::kSuccess};
     }
-    NEARBY_LOGS(INFO) << "Multiplex: Closing physical socket: " << this;
+    LOG(INFO) << "Multiplex: Closing physical socket: " << this;
     return impl_->Close();
   }
 
@@ -106,7 +107,7 @@ class BluetoothSocket : public MediumSocket {
   /** Feeds the received incoming data to the client. */
   void FeedIncomingData(ByteArray data) override {
     if (!IsVirtualSocket()) {
-      NEARBY_LOGS(INFO) << "Feeding data on a physical socket is not allowed.";
+      LOG(INFO) << "Feeding data on a physical socket is not allowed.";
       return;
     }
     blocking_queue_input_stream_->Write(data);
@@ -170,7 +171,7 @@ class BluetoothServerSocket final {
   BluetoothSocket Accept() {
     auto socket = impl_->Accept();
     if (!socket) {
-      NEARBY_LOGS(INFO) << "Accept() failed on server socket: " << this;
+      LOG(INFO) << "Accept() failed on server socket: " << this;
     }
     return BluetoothSocket(std::move(socket));
   }
@@ -179,7 +180,7 @@ class BluetoothServerSocket final {
   //
   // Returns Exception::kIo on error, Exception::kSuccess otherwise.
   Exception Close() {
-    NEARBY_LOGS(INFO) << "Closing server socket: " << this;
+    LOG(INFO) << "Closing server socket: " << this;
     return impl_->Close();
   }
 
@@ -346,8 +347,9 @@ class BluetoothClassicMedium : public api::BluetoothClassicMedium::Observer {
 
   api::BluetoothClassicMedium& GetImpl() { return *impl_; }
   BluetoothAdapter& GetAdapter() { return adapter_; }
-  std::string GetMacAddress() const { return adapter_.GetMacAddress(); }
-  BluetoothDevice GetRemoteDevice(const std::string& mac_address) {
+
+  MacAddress GetAddress() const { return adapter_.GetAddress(); }
+  BluetoothDevice GetRemoteDevice(MacAddress mac_address) {
     return BluetoothDevice(impl_->GetRemoteDevice(mac_address));
   }
 

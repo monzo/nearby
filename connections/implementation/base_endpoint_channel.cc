@@ -30,6 +30,7 @@
 #include "connections/implementation/flags/nearby_connections_feature_flags.h"
 #include "connections/implementation/offline_frames.h"
 #include "internal/flags/nearby_flags.h"
+#include "internal/platform/base64_utils.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/implementation/system_clock.h"
@@ -44,41 +45,13 @@ namespace connections {
 
 namespace {
 using ::location::nearby::analytics::proto::ConnectionsLog;
+using ::location::nearby::proto::connections::Medium::BLE;
+using ::location::nearby::proto::connections::Medium::BLE_L2CAP;
 using DisconnectionReason =
     ::location::nearby::proto::connections::DisconnectionReason;
 
-std::int32_t BytesToInt(const ByteArray& bytes) {
-  const char* int_bytes = bytes.data();
-
-  std::int32_t result = 0;
-  result |= (static_cast<std::int32_t>(int_bytes[0]) & 0x0FF) << 24;
-  result |= (static_cast<std::int32_t>(int_bytes[1]) & 0x0FF) << 16;
-  result |= (static_cast<std::int32_t>(int_bytes[2]) & 0x0FF) << 8;
-  result |= (static_cast<std::int32_t>(int_bytes[3]) & 0x0FF);
-
-  return result;
-}
-
-ByteArray IntToBytes(std::int32_t value) {
-  char int_bytes[sizeof(std::int32_t)];
-  int_bytes[0] = static_cast<char>((value >> 24) & 0x0FF);
-  int_bytes[1] = static_cast<char>((value >> 16) & 0x0FF);
-  int_bytes[2] = static_cast<char>((value >> 8) & 0x0FF);
-  int_bytes[3] = static_cast<char>((value) & 0x0FF);
-
-  return ByteArray(int_bytes, sizeof(int_bytes));
-}
-
-ExceptionOr<std::int32_t> ReadInt(InputStream* reader) {
-  ExceptionOr<ByteArray> read_bytes = reader->ReadExactly(sizeof(std::int32_t));
-  if (!read_bytes.ok()) {
-    return ExceptionOr<std::int32_t>(read_bytes.exception());
-  }
-  return ExceptionOr<std::int32_t>(BytesToInt(std::move(read_bytes.result())));
-}
-
 Exception WriteInt(OutputStream* writer, std::int32_t value) {
-  return writer->Write(IntToBytes(value));
+  return Base64Utils::WriteInt(writer, value);
 }
 
 }  // namespace
@@ -119,25 +92,33 @@ BaseEndpointChannel::BaseEndpointChannel(
       try_count_(try_count) {}
 
 ExceptionOr<ByteArray> BaseEndpointChannel::Read() {
-  PacketMetaData packet_meta_data;
-  return Read(packet_meta_data);
-}
-
-ExceptionOr<ByteArray> BaseEndpointChannel::Read(
-    PacketMetaData& packet_meta_data) {
   ByteArray result;
   {
     MutexLock lock(&reader_mutex_);
 
-    packet_meta_data.StartSocketIo();
-    ExceptionOr<std::int32_t> read_int = ReadInt(reader_);
+    ExceptionOr<std::int32_t> read_int;
+    if (NearbyFlags::GetInstance().GetBoolFlag(
+            config_package_nearby::nearby_connections_feature::
+                kRefactorBleL2cap)) {
+      ExceptionOr<ByteArray> read_control_block_bytes = DispatchPacket();
+      if (!read_control_block_bytes.ok()) {
+        LOG(WARNING) << __func__ << ": Failed to dispatch packet: "
+                     << read_control_block_bytes.exception();
+        return ExceptionOr<ByteArray>(read_control_block_bytes.exception());
+      }
+
+      read_int = (GetMedium() == BLE_L2CAP) ? ReadPayloadLength()
+                                            : Base64Utils::ReadInt(reader_);
+    } else {
+      read_int = Base64Utils::ReadInt(reader_);
+    }
     if (!read_int.ok()) {
       return ExceptionOr<ByteArray>(read_int.exception());
     }
 
     if (read_int.result() < 0 || read_int.result() > max_allowed_read_bytes_) {
-      NEARBY_LOGS(WARNING) << __func__ << ": Read an invalid number of bytes: "
-                           << read_int.result();
+      LOG(WARNING) << __func__ << ": Read an invalid number of bytes: "
+                   << read_int.result();
       return ExceptionOr<ByteArray>(Exception::kIo);
     }
 
@@ -145,8 +126,6 @@ ExceptionOr<ByteArray> BaseEndpointChannel::Read(
     if (!read_bytes.ok()) {
       return read_bytes;
     }
-    packet_meta_data.StopSocketIo();
-    packet_meta_data.SetPacketSize(read_int.result() + sizeof(std::int32_t));
     result = std::move(read_bytes.result());
   }
 
@@ -156,7 +135,6 @@ ExceptionOr<ByteArray> BaseEndpointChannel::Read(
     if (IsEncryptionEnabledLocked()) {
       // If encryption is enabled, decode the message.
       std::string input(std::move(result));
-      packet_meta_data.StartEncryption();
       std::unique_ptr<std::string> decrypted_data =
           crypto_context_->DecodeMessageFromPeer(input);
       if (decrypted_data) {
@@ -169,28 +147,26 @@ ExceptionOr<ByteArray> BaseEndpointChannel::Read(
         // and let it through if it is, otherwise message is erased.
         // TODO(apolyudov): verify this happens at most once per session.
         result = {};
-        auto parsed = parser::FromBytes(ByteArray(input));
+        auto parsed = parser::FromBytes(input);
         if (parsed.ok()) {
           if (parser::GetFrameType(parsed.result()) ==
               location::nearby::connections::V1Frame::KEEP_ALIVE) {
-            NEARBY_LOGS(INFO)
-                << __func__
-                << ": Read unencrypted KEEP_ALIVE on encrypted channel.";
+            LOG(INFO) << __func__
+                      << ": Read unencrypted KEEP_ALIVE on encrypted channel.";
             result = ByteArray(input);
           } else {
-            NEARBY_LOGS(WARNING)
-                << __func__ << ": Read unexpected unencrypted frame of type "
-                << parser::GetFrameType(parsed.result());
+            LOG(WARNING) << __func__
+                         << ": Read unexpected unencrypted frame of type "
+                         << parser::GetFrameType(parsed.result());
           }
         } else {
           message_exception.value = parsed.exception();
-          NEARBY_LOGS(WARNING)
-              << __func__ << ": Unable to parse data as unencrypted message.";
+          LOG(WARNING) << __func__
+                       << ": Unable to parse data as unencrypted message.";
         }
       }
-      packet_meta_data.StopEncryption();
       if (result.Empty()) {
-        NEARBY_LOGS(WARNING) << __func__ << ": Unable to parse read result.";
+        LOG(WARNING) << __func__ << ": Unable to parse read result.";
         return ExceptionOr<ByteArray>(message_exception);
       }
     }
@@ -203,13 +179,7 @@ ExceptionOr<ByteArray> BaseEndpointChannel::Read(
   return ExceptionOr<ByteArray>(result);
 }
 
-Exception BaseEndpointChannel::Write(const ByteArray& data) {
-  PacketMetaData packet_meta_data;
-  return Write(data, packet_meta_data);
-}
-
-Exception BaseEndpointChannel::Write(const ByteArray& data,
-                                     PacketMetaData& packet_meta_data) {
+Exception BaseEndpointChannel::Write(absl::string_view data) {
   {
     MutexLock pause_lock(&is_paused_mutex_);
     if (is_paused_) {
@@ -217,8 +187,9 @@ Exception BaseEndpointChannel::Write(const ByteArray& data,
     }
   }
 
-  ByteArray encrypted_data;
-  const ByteArray* data_to_write = &data;
+  absl::string_view  data_to_write = data;
+  // Make sure encrypted message is value until end of function.
+  std::unique_ptr<std::string> encrypted;
   {
     // Holding both mutexes is necessary to prevent the keep alive and payload
     // threads from writing encrypted messages out of order which causes a
@@ -229,48 +200,48 @@ Exception BaseEndpointChannel::Write(const ByteArray& data,
       MutexLock crypto_lock(&crypto_mutex_);
       if (IsEncryptionEnabledLocked()) {
         // If encryption is enabled, encode the message.
-        packet_meta_data.StartEncryption();
-        std::unique_ptr<std::string> encrypted =
-            crypto_context_->EncodeMessageToPeer(std::string(data));
-        packet_meta_data.StopEncryption();
+        encrypted = crypto_context_->EncodeMessageToPeer(data);
         if (!encrypted) {
-          NEARBY_LOGS(WARNING) << __func__ << ": Failed to encrypt data.";
+          LOG(WARNING) << __func__ << ": Failed to encrypt data.";
           return {Exception::kIo};
         }
-        encrypted_data = ByteArray(std::move(*encrypted));
-        data_to_write = &encrypted_data;
+        data_to_write = *encrypted;
       }
     }
 
-    size_t data_size = data_to_write->size();
+    size_t data_size = data_to_write.size();
     if (data_size < 0 || data_size > max_allowed_read_bytes_) {
-      NEARBY_LOGS(WARNING) << __func__ << ": Write an invalid number of bytes: "
-                           << data_size;
+      LOG(WARNING) << __func__
+                   << ": Write an invalid number of bytes: " << data_size;
       return {Exception::kIo};
     }
 
-    packet_meta_data.StartSocketIo();
-    Exception write_exception =
-        WriteInt(writer_, static_cast<std::int32_t>(data_size));
+    Exception write_exception;
+    if (NearbyFlags::GetInstance().GetBoolFlag(
+            config_package_nearby::nearby_connections_feature::
+                kRefactorBleL2cap) &&
+        (GetMedium() == BLE || GetMedium() == BLE_L2CAP)) {
+      write_exception = WritePayloadLength(data_size);
+    } else {
+      write_exception = WriteInt(writer_, static_cast<std::int32_t>(data_size));
+    }
     if (write_exception.Raised()) {
-      NEARBY_LOGS(WARNING) << __func__ << ": Failed to write header: "
-                           << write_exception.value;
+      LOG(WARNING) << __func__
+                   << ": Failed to write header: " << write_exception.value;
       return write_exception;
     }
-    write_exception = writer_->Write(*data_to_write);
+    write_exception = writer_->Write(data_to_write);
     if (write_exception.Raised()) {
-      NEARBY_LOGS(WARNING) << __func__ << ": Failed to write data: "
-                           << write_exception.value;
+      LOG(WARNING) << __func__
+                   << ": Failed to write data: " << write_exception.value;
       return write_exception;
     }
     Exception flush_exception = writer_->Flush();
     if (flush_exception.Raised()) {
-      NEARBY_LOGS(WARNING) << __func__ << ": Failed to flush writer: "
-                           << flush_exception.value;
+      LOG(WARNING) << __func__
+                   << ": Failed to flush writer: " << flush_exception.value;
       return flush_exception;
     }
-    packet_meta_data.StopSocketIo();
-    packet_meta_data.SetPacketSize(data_size + sizeof(std::uint32_t));
   }
 
   {
@@ -285,7 +256,7 @@ void BaseEndpointChannel::Close() {
     // In case channel is paused, resume it first thing.
     MutexLock lock(&is_paused_mutex_);
     if (is_closed_) {
-      NEARBY_VLOG(1) << "EndpointChannel already closed";
+      VLOG(1) << "EndpointChannel already closed";
       return;
     }
     is_closed_ = true;
@@ -303,8 +274,8 @@ void BaseEndpointChannel::CloseIo() {
     // IO and Read() will proceed normally (with Exception::kIo).
     Exception exception = reader_->Close();
     if (!exception.Ok()) {
-      NEARBY_LOGS(WARNING) << __func__
-                           << ": Exception closing reader: " << exception.value;
+      LOG(WARNING) << __func__
+                   << ": Exception closing reader: " << exception.value;
     }
   }
   {
@@ -313,8 +284,8 @@ void BaseEndpointChannel::CloseIo() {
     // IO and Write() will proceed normally (with Exception::kIo).
     Exception exception = writer_->Close();
     if (!exception.Ok()) {
-      NEARBY_LOGS(WARNING) << __func__
-                           << ": Exception closing writer: " << exception.value;
+      LOG(WARNING) << __func__
+                   << ": Exception closing writer: " << exception.value;
     }
   }
 }
@@ -339,8 +310,7 @@ void BaseEndpointChannel::Close(
 void BaseEndpointChannel::Close(
     location::nearby::proto::connections::DisconnectionReason reason,
     SafeDisconnectionResult result) {
-  NEARBY_LOGS(INFO) << __func__
-                    << ": Closing endpoint channel, reason: " << reason;
+  LOG(INFO) << __func__ << ": Closing endpoint channel, reason: " << reason;
   Close();
 
   if (analytics_recorder_ != nullptr && !endpoint_id_.empty()) {
@@ -477,8 +447,8 @@ void BaseEndpointChannel::BlockUntilUnpaused() {
   while (is_paused_) {
     Exception wait_succeeded = is_paused_cond_.Wait();
     if (!wait_succeeded.Ok()) {
-      NEARBY_LOGS(WARNING) << __func__ << ": Failure waiting to unpause: "
-                           << wait_succeeded.value;
+      LOG(WARNING) << __func__
+                   << ": Failure waiting to unpause: " << wait_succeeded.value;
       return;
     }
   }
@@ -495,7 +465,7 @@ std::unique_ptr<std::string> BaseEndpointChannel::EncodeMessageForTests(
     absl::string_view data) {
   MutexLock lock(&crypto_mutex_);
   DCHECK(IsEncryptionEnabledLocked());
-  return crypto_context_->EncodeMessageToPeer(std::string(data));
+  return crypto_context_->EncodeMessageToPeer(data);
 }
 
 }  // namespace connections

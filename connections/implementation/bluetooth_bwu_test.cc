@@ -13,17 +13,17 @@
 // limitations under the License.
 
 #include <memory>
+#include <string>
 #include <utility>
 
 #include "gtest/gtest.h"
 #include "absl/time/time.h"
-#include "connections/implementation/bwu_handler.h"
 #include "connections/implementation/bluetooth_bwu_handler.h"
+#include "connections/implementation/bwu_handler.h"
 #include "connections/implementation/client_proxy.h"
 #include "connections/implementation/endpoint_channel.h"
 #include "connections/implementation/mediums/mediums.h"
 #include "connections/implementation/offline_frames.h"
-#include "internal/platform/byte_array.h"
 #include "internal/platform/count_down_latch.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/expected.h"
@@ -75,7 +75,7 @@ TEST_F(BluetoothBwuTest, SoftAPBWUInit_STACreateEndpointChannel) {
       mediums_1, [&](ClientProxy* client,
                      std::unique_ptr<BwuHandler::IncomingSocketConnection>
                          mutable_connection) {
-        NEARBY_LOGS(WARNING) << "Server socket connection accept call back";
+        LOG(WARNING) << "Server socket connection accept call back";
         accept_latch.CountDown();
         EXPECT_TRUE(end_latch.Await(kWaitDuration).result());
       });
@@ -83,11 +83,11 @@ TEST_F(BluetoothBwuTest, SoftAPBWUInit_STACreateEndpointChannel) {
   // client_1 works as Bluetooth Server Device
   SingleThreadExecutor server_executor;
   server_executor.Execute([&]() {
-    ByteArray upgrade_path_available_frame =
+    std::string upgrade_path_available_frame =
         handler_1->InitializeUpgradedMediumForEndpoint(&client_1,
                                                        /*service_id=*/"A",
                                                        /*endpoint_id=*/"1");
-    EXPECT_FALSE(upgrade_path_available_frame.Empty());
+    EXPECT_FALSE(upgrade_path_available_frame.empty());
 
     upgrade_frame = parser::FromBytes(upgrade_path_available_frame);
     start_latch.CountDown();
@@ -122,7 +122,7 @@ TEST_F(BluetoothBwuTest, SoftAPBWUInit_STACreateEndpointChannel) {
           OperationResultCode::CONNECTIVITY_BLUETOOTH_DEVICE_OBTAIN_FAILURE);
       accept_latch.CountDown();
     }
-    EXPECT_FALSE(mediums_2.GetBluetoothClassic().GetMacAddress().empty());
+    EXPECT_TRUE(mediums_2.GetBluetoothClassic().GetAddress().IsSet());
     handler_2->RevertResponderState(/*service_id=*/"A");
     end_latch.CountDown();
   });

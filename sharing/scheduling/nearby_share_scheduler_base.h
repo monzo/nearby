@@ -18,11 +18,12 @@
 #include <stddef.h>
 
 #include <memory>
-#include <optional>
 #include <string>
 
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
+#include "internal/platform/clock.h"
+#include "internal/platform/timer.h"
 #include "sharing/internal/api/preference_manager.h"
 #include "sharing/internal/public/connectivity_manager.h"
 #include "sharing/internal/public/context.h"
@@ -50,6 +51,17 @@ class NearbyShareSchedulerBase : public NearbyShareScheduler {
  public:
   ~NearbyShareSchedulerBase() override;
 
+  void MakeImmediateRequest() override;
+  void HandleResult(bool success) override;
+  void Reschedule() override;
+  absl::Time GetLastSuccessTime() const override;
+  bool IsWaitingForResult() const override;
+  size_t GetNumConsecutiveFailures() const override;
+
+  absl::Duration GetTimeUntilNextRequestForTest() const {
+    return GetTimeUntilNextRequest();
+  }
+
  protected:
   // |context|: Nearby context, holding nearby common components.
   // |retry_failures|: Whether or not automatically retry failures using
@@ -66,24 +78,22 @@ class NearbyShareSchedulerBase : public NearbyShareScheduler {
       absl::string_view pref_name, OnRequestCallback callback);
 
   // The time to wait until the next regularly recurring request.
-  virtual std::optional<absl::Duration> TimeUntilRecurringRequest(
+  // Returns `InfiniteDuration` if there is no recurring request scheduled.
+  virtual absl::Duration TimeUntilRecurringRequest(
       absl::Time now) const = 0;
 
-  // NearbyShareScheduler:
-  void MakeImmediateRequest() override;
-  void HandleResult(bool success) override;
-  void Reschedule() override;
-  std::optional<absl::Time> GetLastSuccessTime() const override;
-  std::optional<absl::Duration> GetTimeUntilNextRequest() const override;
-  bool IsWaitingForResult() const override;
-  size_t GetNumConsecutiveFailures() const override;
   void OnStart() override;
   void OnStop() override;
+  // Returns the time until the next scheduled request. Returns
+  // `InfiniteDuration` if there is no request scheduled.
+  absl::Duration GetTimeUntilNextRequest() const;
 
-  void OnConnectionChanged(
-      nearby::ConnectivityManager::ConnectionType connection_type);
+ private:
+  void OnInternetConnectivityChanged(bool is_internet_connected);
 
-  std::optional<absl::Time> GetLastAttemptTime() const;
+  // Get the last attempt time from prefs.  Returns `InfinitePast` if the last
+  // attempt time is not set.
+  absl::Time GetLastAttemptTime() const;
   bool HasPendingImmediateRequest() const;
 
   // Set and persist scheduling data in prefs.
@@ -93,24 +103,18 @@ class NearbyShareSchedulerBase : public NearbyShareScheduler {
   void SetHasPendingImmediateRequest(bool has_pending_immediate_request);
   void SetIsWaitingForResult(bool is_waiting_for_result);
 
-  // On startup, set a pending immediate request if the pref service indicates
-  // that there was an in-progress request or a pending immediate request at the
-  // time of shutdown.
-  void InitializePersistedRequest();
-
   // The amount of time to wait until the next automatic failure retry. Returns
-  // std::nullopt if there is no failure to retry or if failure retry is not
-  // enabled for the scheduler.
-  std::optional<absl::Duration> TimeUntilRetry(absl::Time now) const;
+  // `InfiniteDuration` if there is no failure to retry or if failure retry is
+  // not enabled for the scheduler.
+  absl::Duration TimeUntilRetry(absl::Time now) const;
 
   // Notifies the owner that a request is ready. Early returns if not online and
   // the scheduler requires connectivity; the attempt is rescheduled when
   // connectivity is restored.
   void OnTimerFired();
 
-  void PrintSchedulerState() const;
+  void PrintSchedulerState(absl::Duration time_until_next_request) const;
 
- private:
   nearby::ConnectivityManager* const connectivity_manager_;
   nearby::sharing::api::PreferenceManager& preference_manager_;
   const nearby::Clock* const clock_;
@@ -118,8 +122,7 @@ class NearbyShareSchedulerBase : public NearbyShareScheduler {
   const bool retry_failures_;
   const bool require_connectivity_;
   const std::string pref_name_;
-  bool is_initialized_ = false;
-  std::string connection_listener_name_;
+  const std::string connection_listener_name_;
 
   std::unique_ptr<nearby::Timer> timer_;
 };

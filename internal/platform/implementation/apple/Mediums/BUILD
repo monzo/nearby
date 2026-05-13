@@ -1,4 +1,6 @@
-# Copyright 2020 Google LLC
+load("@rules_cc//cc:objc_library.bzl", "objc_library")
+
+# Copyright 2025 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,55 +22,9 @@ package(default_visibility = [
 
 objc_library(
     name = "Mediums",
-    srcs = [
-        "BLEv2/GNCBLEError.m",
-        "BLEv2/GNCBLEGATTCharacteristic.m",
-        "BLEv2/GNCBLEGATTClient.m",
-        "BLEv2/GNCBLEGATTServer.m",
-        "BLEv2/GNCBLEMedium.m",
-        "BLEv2/GNCCentralManager.m",
-        "BLEv2/GNCPeripheral.m",
-        "BLEv2/GNCPeripheralManager.m",
-        "BLEv2/NSData+GNCWebSafeBase64.m",
-        "Ble/GNCMBleConnection.m",
-        "Ble/GNCMBleUtils.mm",
-        "GNCLeaks.h",
-        "GNCLeaks.m",
-        "GNCMConnection.m",
-        "WiFiCommon/GNCIPv4Address.m",
-        "WiFiCommon/GNCNWFramework.m",
-        "WiFiCommon/GNCNWFrameworkError.m",
-        "WiFiCommon/GNCNWFrameworkServerSocket.m",
-        "WiFiCommon/GNCNWFrameworkServerSocket+Internal.h",
-        "WiFiCommon/GNCNWFrameworkSocket.m",
-    ],
-    hdrs = [
-        "BLEv2/GNCBLEError.h",
-        "BLEv2/GNCBLEGATTCharacteristic.h",
-        "BLEv2/GNCBLEGATTClient.h",
-        "BLEv2/GNCBLEGATTServer.h",
-        "BLEv2/GNCBLEMedium.h",
-        "BLEv2/GNCCentralManager.h",
-        "BLEv2/GNCPeripheral.h",
-        "BLEv2/GNCPeripheralManager.h",
-        "BLEv2/NSData+GNCWebSafeBase64.h",
-        "Ble/GNCMBleConnection.h",
-        "Ble/GNCMBleUtils.h",
-        "GNCMConnection.h",
-        "WiFiCommon/GNCIPv4Address.h",
-        "WiFiCommon/GNCNWFramework.h",
-        "WiFiCommon/GNCNWFrameworkError.h",
-        "WiFiCommon/GNCNWFrameworkServerSocket.h",
-        "WiFiCommon/GNCNWFrameworkSocket.h",
-    ],
     deps = [
-        "//internal/platform/implementation/apple:Shared",
-        "//internal/platform/implementation/apple/Mediums/Ble/Sockets:Shared",
-        "//proto/mediums:ble_frames_cc_proto",
-        "//third_party/apple_frameworks:CoreBluetooth",
-        "//third_party/apple_frameworks:Foundation",
-        "//third_party/apple_frameworks:Network",
-        "//third_party/apple_frameworks:ObjectiveC",
-        "//third_party/objective_c/google_toolbox_for_mac:GTM_Logger",
+        "//internal/platform/implementation/apple/Mediums/BLE",
+        "//internal/platform/implementation/apple/Mediums/Hotspot",
+        "//internal/platform/implementation/apple/Mediums/WiFiCommon",
     ],
 )

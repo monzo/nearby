@@ -140,7 +140,9 @@ class AnalyticsRecorder {
   void NewSendAttachmentsStart(int64_t session_id,
                                const AttachmentContainer& attachments,
                                int transfer_position,
-                               int concurrent_connections);
+                               int concurrent_connections,
+                               bool advanced_protection_enabled,
+                               bool advanced_protection_mismatch);
 
   void NewSendFastInitialization();
 
@@ -163,11 +165,6 @@ class AnalyticsRecorder {
                         int64_t duration_millis);
 
   void NewDeviceSettings(AnalyticsDeviceSettings settings);
-
-  void NewFastShareServerResponse(
-      location::nearby::proto::sharing::ServerActionName name,
-      location::nearby::proto::sharing::ServerResponseState state,
-      int64_t latency_millis);
 
   void NewSetDataUsage(nearby::sharing::proto::DataUsage original_preference,
                        nearby::sharing::proto::DataUsage preference);

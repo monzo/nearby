@@ -16,7 +16,7 @@
 #define THIRD_PARTY_NEARBY_INTERNAL_TEST_FAKE_DEVICE_INFO_H_
 
 #include <cstddef>
-#include <filesystem>  // NOLINT
+#include <cstdint>
 #include <functional>
 #include <limits>
 #include <optional>
@@ -25,14 +25,17 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/string_view.h"
-#include "internal/platform/device_info.h"
+#include "internal/base/file_path.h"
+#include "internal/base/files.h"
 #include "internal/platform/implementation/device_info.h"
 
 namespace nearby {
 
-class FakeDeviceInfo : public DeviceInfo {
+class FakeDeviceInfo : public api::DeviceInfo {
  public:
-  std::string GetOsDeviceName() const override { return device_name_; }
+  std::optional<std::string> GetOsDeviceName() const override {
+    return device_name_;
+  }
 
   api::DeviceInfo::DeviceType GetDeviceType() const override {
     return device_type_;
@@ -40,21 +43,23 @@ class FakeDeviceInfo : public DeviceInfo {
 
   api::DeviceInfo::OsType GetOsType() const override { return os_type_; }
 
-  std::filesystem::path GetDownloadPath() const override {
+  FilePath GetDownloadPath() const override {
     return download_path_;
   }
 
-  std::filesystem::path GetAppDataPath() const override {
-    return app_data_path_;
+  FilePath GetLocalAppDataPath(FilePath sub_path) const override {
+    FilePath path = app_data_path_;
+    path.append(sub_path);
+    return path;
   }
 
-  std::filesystem::path GetTemporaryPath() const override { return temp_path_; }
+  FilePath GetTemporaryPath() const override { return temp_path_; }
 
-  std::filesystem::path GetLogPath() const override { return temp_path_; }
+  FilePath GetLogPath() const override { return temp_path_; }
 
   std::optional<size_t> GetAvailableDiskSpaceInBytes(
-      const std::filesystem::path& path) const override {
-    std::wstring path_key = path.wstring();
+      const FilePath& path) const override {
+    std::wstring path_key = path.ToWideString();
     auto it = available_space_map_.find(path_key);
     if (it != available_space_map_.end()) {
       return it->second;
@@ -92,15 +97,15 @@ class FakeDeviceInfo : public DeviceInfo {
 
   void SetOsType(api::DeviceInfo::OsType os_type) { os_type_ = os_type; }
 
-  void SetDownloadPath(std::filesystem::path path) { download_path_ = path; }
+  void SetDownloadPath(FilePath path) { download_path_ = path; }
 
-  void SetAppDataPath(std::filesystem::path path) { app_data_path_ = path; }
+  void SetAppDataPath(FilePath path) { app_data_path_ = path; }
 
-  void SetTemporaryPath(std::filesystem::path path) { temp_path_ = path; }
+  void SetTemporaryPath(FilePath path) { temp_path_ = path; }
 
-  void SetAvailableDiskSpaceInBytes(const std::filesystem::path& path,
+  void SetAvailableDiskSpaceInBytes(const FilePath& path,
                                     size_t available_bytes) {
-    available_space_map_.emplace(path.wstring(), available_bytes);
+    available_space_map_.emplace(path.ToWideString(), available_bytes);
   }
 
   void ResetDiskSpace() { available_space_map_.clear(); }
@@ -121,9 +126,9 @@ class FakeDeviceInfo : public DeviceInfo {
   api::DeviceInfo::DeviceType device_type_ =
       api::DeviceInfo::DeviceType::kLaptop;
   api::DeviceInfo::OsType os_type_ = api::DeviceInfo::OsType::kWindows;
-  std::filesystem::path download_path_ = std::filesystem::temp_directory_path();
-  std::filesystem::path app_data_path_ = std::filesystem::temp_directory_path();
-  std::filesystem::path temp_path_ = std::filesystem::temp_directory_path();
+  FilePath download_path_ = Files::GetTemporaryDirectory();
+  FilePath app_data_path_ = Files::GetTemporaryDirectory();
+  FilePath temp_path_ = Files::GetTemporaryDirectory();
   absl::flat_hash_map<std::wstring, size_t> available_space_map_;
   absl::flat_hash_map<std::string,
                       std::function<void(api::DeviceInfo::ScreenStatus)>>

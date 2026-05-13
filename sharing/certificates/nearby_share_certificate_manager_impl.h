@@ -19,33 +19,31 @@
 #include <functional>
 #include <memory>
 #include <optional>
-#include <set>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "location/nearby/sharing/lib/account/account_manager.h"
+#include "location/nearby/sharing/lib/rpc/sharing_rpc_client.h"
+#include "absl/base/nullability.h"
 #include "absl/functional/any_invocable.h"
-#include "absl/strings/string_view.h"
+#include "absl/status/statusor.h"
 #include "absl/time/time.h"
-#include "internal/platform/implementation/account_manager.h"
+#include "internal/base/file_path.h"
 #include "internal/platform/task_runner.h"
 #include "sharing/certificates/nearby_share_certificate_manager.h"
 #include "sharing/certificates/nearby_share_certificate_storage.h"
 #include "sharing/certificates/nearby_share_encrypted_metadata_key.h"
 #include "sharing/certificates/nearby_share_private_certificate.h"
-#include "sharing/contacts/nearby_share_contact_manager.h"
 #include "sharing/internal/api/preference_manager.h"
 #include "sharing/internal/api/public_certificate_database.h"
 #include "sharing/internal/api/sharing_platform.h"
-#include "sharing/internal/api/sharing_rpc_client.h"
-#include "sharing/internal/impl/common/nearby_identity_grpc_client.h"
 #include "sharing/internal/public/context.h"
 #include "sharing/local_device_data/nearby_share_local_device_data_manager.h"
 #include "sharing/proto/enums.pb.h"
 #include "sharing/proto/rpc_resources.pb.h"
 
-namespace nearby {
-namespace sharing {
+namespace nearby::sharing {
 
 class NearbyShareScheduler;
 
@@ -60,7 +58,6 @@ class NearbyShareScheduler;
 // changes to the local device data, such as the device name.
 class NearbyShareCertificateManagerImpl
     : public NearbyShareCertificateManager,
-      public NearbyShareContactManager::Observer,
       public NearbyShareLocalDeviceDataManager::Observer {
  public:
   class Factory {
@@ -69,9 +66,8 @@ class NearbyShareCertificateManagerImpl
         Context* context,
         nearby::sharing::api::SharingPlatform& sharing_platform,
         NearbyShareLocalDeviceDataManager* local_device_data_manager,
-        NearbyShareContactManager* contact_manager,
-        absl::string_view profile_path,
-        nearby::sharing::api::SharingRpcClientFactory* client_factory);
+        const FilePath& profile_path,
+        nearby::sharing::api::IdentityRpcClient* absl_nonnull identity_client);
     static void SetFactoryForTesting(Factory* test_factory);
 
    protected:
@@ -79,9 +75,9 @@ class NearbyShareCertificateManagerImpl
     virtual std::unique_ptr<NearbyShareCertificateManager> CreateInstance(
         Context* context,
         NearbyShareLocalDeviceDataManager* local_device_data_manager,
-        NearbyShareContactManager* contact_manager,
-        absl::string_view profile_path,
-        nearby::sharing::api::SharingRpcClientFactory* client_factory) = 0;
+        const FilePath& profile_path,
+        nearby::sharing::api::IdentityRpcClient* absl_nonnull
+            identity_client) = 0;
 
    private:
     static Factory* test_factory_;
@@ -89,7 +85,14 @@ class NearbyShareCertificateManagerImpl
 
   ~NearbyShareCertificateManagerImpl() override;
 
+  void GetDecryptedPublicCertificate(
+      NearbyShareEncryptedMetadataKey encrypted_metadata_key,
+      CertDecryptedCallback callback) override;
+  void DownloadPublicCertificates() override;
+  void ForceUploadPrivateCertificates() override;
+  void ClearPublicCertificates(std::function<void(bool)> callback) override;
   void SetVendorId(int32_t vendor_id) override;
+  std::string Dump() const override;
 
  private:
   // Class for maintaining a single instance of public certificate download
@@ -98,42 +101,36 @@ class NearbyShareCertificateManagerImpl
   class CertificateDownloadContext {
    public:
     CertificateDownloadContext(
-        nearby::sharing::api::SharingRpcClient* nearby_share_client,
-        nearby::sharing::api::IdentityRpcClient* nearby_identity_client,
+        nearby::sharing::api::IdentityRpcClient* absl_nonnull
+            nearby_identity_client,
         std::string device_id,
-        absl::AnyInvocable<void() &&> download_failure_callback,
-        absl::AnyInvocable<
-            void(const std::vector<nearby::sharing::proto::PublicCertificate>&
-                     certificates) &&>
-            download_success_callback)
-        : nearby_share_client_(nearby_share_client),
-          nearby_identity_client_(nearby_identity_client),
+        absl::AnyInvocable<void(absl::StatusOr<std::vector<
+                                    nearby::sharing::proto::PublicCertificate>>
+                                    certificates_status) &&>
+            download_callback)
+        : nearby_identity_client_(nearby_identity_client),
           device_id_(std::move(device_id)),
-          download_failure_callback_(std::move(download_failure_callback)),
-          download_success_callback_(std::move(download_success_callback)) {}
-
-    // Fetches the next page of certificates.
-    // If |next_page_token_| is empty, it fetches the first page.
-    // On successful download, if  page token in the response is empty, the
-    // |download_success_callback_| is invoked with all downloaded certificates.
-    void FetchNextPage();
+          download_callback_(std::move(download_callback)) {}
 
     // Fetches the next page of certificates by calling Identity API
     // QuerySharedCredentials.
+    // If |next_page_token_| is empty, it fetches the first page.
+    // On successful download, if  page token in the response is empty, the
+    // |download_success_callback_| is invoked with all downloaded certificates.
     void QuerySharedCredentialsFetchNextPage();
+    void QuerySharedCredentialsWithBindingIdsFetchNextPage();
 
    private:
-    nearby::sharing::api::SharingRpcClient* const nearby_share_client_;
-    nearby::sharing::api::IdentityRpcClient* const nearby_identity_client_;
+    nearby::sharing::api::IdentityRpcClient* absl_nonnull const
+        nearby_identity_client_;
     std::string device_id_;
     std::optional<std::string> next_page_token_;
     int page_number_ = 1;
     std::vector<nearby::sharing::proto::PublicCertificate> certificates_;
-    absl::AnyInvocable<void() &&> download_failure_callback_;
-    absl::AnyInvocable<
-        void(const std::vector<nearby::sharing::proto::PublicCertificate>&
-                 certificates) &&>
-        download_success_callback_;
+    absl::AnyInvocable<void(
+        absl::StatusOr<std::vector<nearby::sharing::proto::PublicCertificate>>
+            certificates_status) &&>
+        download_callback_;
   };
 
   NearbyShareCertificateManagerImpl(
@@ -143,94 +140,87 @@ class NearbyShareCertificateManagerImpl
       std::unique_ptr<nearby::sharing::api::PublicCertificateDatabase>
           public_certificate_database,
       NearbyShareLocalDeviceDataManager* local_device_data_manager,
-      NearbyShareContactManager* contact_manager,
-       nearby::sharing::api::SharingRpcClientFactory* client_factory);
+      nearby::sharing::api::IdentityRpcClient* absl_nonnull identity_client);
 
   // NearbyShareCertificateManager:
-  std::vector<nearby::sharing::proto::PublicCertificate>
-  GetPrivateCertificatesAsPublicCertificates(
-      proto::DeviceVisibility visibility) override;
-  void GetDecryptedPublicCertificate(
-      NearbyShareEncryptedMetadataKey encrypted_metadata_key,
-      CertDecryptedCallback callback) override;
-  void DownloadPublicCertificates() override;
-  void PrivateCertificateRefresh(bool force_upload) override;
-  void ClearPublicCertificates(std::function<void(bool)> callback) override;
-  void OnStart() override;
-  void OnStop() override;
+  void OnStartScheduledTasks() override;
+  void OnStopScheduledTasks() override;
   std::optional<NearbySharePrivateCertificate> GetValidPrivateCertificate(
       proto::DeviceVisibility visibility) const override;
   void UpdatePrivateCertificateInStorage(
       const NearbySharePrivateCertificate& private_certificate) override;
-
-  // NearbyShareContactManager::Observer:
-  void OnContactsDownloaded(
-      const std::vector<nearby::sharing::proto::ContactRecord>& contacts,
-      uint32_t num_unreachable_contacts_filtered_out) override;
-  void OnContactsUploaded(bool did_contacts_change_since_last_upload) override;
 
   // NearbyShareLocalDeviceDataManager::Observer:
   void OnLocalDeviceDataChanged(bool did_device_name_change,
                                 bool did_full_name_change,
                                 bool did_icon_change) override;
 
-  // Dump certs information.
-  std::string Dump() const override;
-
   // Used by the private certificate expiration scheduler to determine the next
-  // private certificate expiration time. Returns base::Time::Min() if
-  // certificates are missing. This function never returns absl::nullopt.
-  std::optional<absl::Time> NextPrivateCertificateExpirationTime();
+  // private certificate expiration time. Returns InfinitePast() if
+  // certificates are missing.  Returns InfiniteFuture() if the user is not
+  // logged in.
+  absl::Time NextPrivateCertificateExpirationTime();
 
   // Used by the public certificate expiration scheduler to determine the next
-  // public certificate expiration time. Returns absl::nullopt if no public
+  // public certificate expiration time. Returns InfiniteFuture() if no public
   // certificates are present, and no expiration event is scheduled.
-  std::optional<absl::Time> NextPublicCertificateExpirationTime();
+  absl::Time NextPublicCertificateExpirationTime();
 
-  // Invoked by the private certificate expiration scheduler when an expired
-  // private certificate needs to be removed or if no private certificates exist
-  // yet. New certificate(s) will be created, and an upload to the Nearby Share
-  // server will be requested.
-  void OnPrivateCertificateExpiration();
+  // Clears all existing private certificates and regenerates new ones, then
+  // uploads them to the server, without triggering contacts update.
+  void RegeneratePrivateCertificates();
 
-  // Invoked by the public certificate expiration scheduler when an expired
-  // public certificate needs to be removed from storage.
-  void OnPublicCertificateExpiration();
+  // Certificate operations that run on the executor.
+  // Returns true if the operation was successful.
+  bool RefreshPrivateCertificatesInExecutor(bool force_upload);
+  bool UploadDeviceCertificatesInExecutor(
+      const std::vector<NearbySharePrivateCertificate>& private_certs,
+      bool force_update_contacts);
+  bool DownloadPublicCertificatesInExecutor();
+  bool RemoveExpiredPublicCertificatesInExecutor();
 
-  void UploadLocalDeviceCertificates();
-
-  void OnPublicCertificatesDownloadSuccess(
+  // Updates the public certificates in the certificate storage. Returns true if
+  // the certificates were successfully updated.
+  bool UpdatePublicCertificates(
       const std::vector<nearby::sharing::proto::PublicCertificate>&
           certificates);
-  void OnPublicCertificatesDownloadFailure();
+
+  void AddCertifactesToPublishDeviceRequest(
+      const std::vector<NearbySharePrivateCertificate>& private_certs,
+      google::nearby::identity::v1::PublishDeviceRequest& request);
+
+  // Returns the device id use to identify the local device in BE.
+  std::string GetId();
+
+  // Calls the GetAccountInfo RPC to update the account info.
+  bool UpdateAccountInfoInExecutor();
 
   Context* const context_;
   AccountManager& account_manager_;
   NearbyShareLocalDeviceDataManager* const local_device_data_manager_;
-  NearbyShareContactManager* const contact_manager_;
+  nearby::sharing::api::PreferenceManager& preference_manager_;
   int32_t vendor_id_ = 0;  // Defaults to GOOGLE.
-  std::unique_ptr< nearby::sharing::api::SharingRpcClient> nearby_client_;
-  std::unique_ptr<nearby::sharing::api::IdentityRpcClient>
+  nearby::sharing::api::IdentityRpcClient* absl_nonnull const
       nearby_identity_client_;
 
   std::shared_ptr<NearbyShareCertificateStorage> certificate_storage_;
-  std::unique_ptr<NearbyShareScheduler>
+  absl_nonnull std::unique_ptr<NearbyShareScheduler>
       private_certificate_expiration_scheduler_;
-  std::unique_ptr<NearbyShareScheduler>
+  absl_nonnull std::unique_ptr<NearbyShareScheduler>
       public_certificate_expiration_scheduler_;
-  std::unique_ptr<NearbyShareScheduler>
-      upload_local_device_certificates_scheduler_;
-  std::unique_ptr<NearbyShareScheduler> download_public_certificates_scheduler_;
+  absl_nonnull std::unique_ptr<NearbyShareScheduler>
+      force_contacts_update_scheduler_;
+  absl_nonnull std::unique_ptr<NearbyShareScheduler>
+      download_public_certificates_scheduler_;
+  // Scheduled task that updates the account info from BE.
+  // Specifically, it will keep fetch the Titanium enrollment state and store in
+  // preferences.
+  absl_nonnull std::unique_ptr<NearbyShareScheduler>
+      account_info_update_scheduler_;
 
   std::unique_ptr<TaskRunner> executor_;
-  // Whether we need to regenerate the certificates and make another
-  // PublishDevice call. At every PublishDevice call, we check
-  // PublishDeviceResponse to see if contacts are removed. In which case, we
-  // need to regenerate the certificates and make another PublishDevice call.
-  bool call_publish_device_after_certs_regen_ = false;
 };
 
-}  // namespace sharing
-}  // namespace nearby
+}  // namespace nearby::sharing
 
 #endif  // THIRD_PARTY_NEARBY_SHARING_CERTIFICATES_NEARBY_SHARE_CERTIFICATE_MANAGER_IMPL_H_

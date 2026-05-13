@@ -23,9 +23,9 @@
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "connections/implementation/analytics/analytics_recorder.h"
-#include "connections/implementation/analytics/packet_meta_data.h"
 #include "connections/implementation/endpoint_channel.h"
 #include "internal/platform/byte_array.h"
+#include "internal/platform/condition_variable.h"
 #include "internal/platform/exception.h"
 #include "internal/platform/input_stream.h"
 #include "internal/platform/mutex.h"
@@ -33,8 +33,6 @@
 
 namespace nearby {
 namespace connections {
-
-using analytics::PacketMetaData;
 
 class BaseEndpointChannel : public EndpointChannel {
  public:
@@ -50,12 +48,10 @@ class BaseEndpointChannel : public EndpointChannel {
   ~BaseEndpointChannel() override = default;
 
   // EndpointChannel:
-  ExceptionOr<ByteArray> Read() override;
-  ExceptionOr<ByteArray> Read(PacketMetaData& packet_meta_data)
+  ExceptionOr<ByteArray> Read()
       ABSL_LOCKS_EXCLUDED(reader_mutex_, crypto_mutex_,
                           last_read_mutex_) override;
-  Exception Write(const ByteArray& data) override;
-  Exception Write(const ByteArray& data, PacketMetaData& packet_meta_data)
+  Exception Write(absl::string_view data)
       ABSL_LOCKS_EXCLUDED(writer_mutex_, crypto_mutex_) override;
   void Close() ABSL_LOCKS_EXCLUDED(is_paused_mutex_) override;
   void Close(location::nearby::proto::connections::DisconnectionReason reason)
@@ -88,6 +84,23 @@ class BaseEndpointChannel : public EndpointChannel {
   uint32_t GetNextKeepAliveSeqNo() const override;
   void SetAnalyticsRecorder(analytics::AnalyticsRecorder* analytics_recorder,
                             const std::string& endpoint_id) override;
+
+  // Reads a complete packet from the underlying medium.
+  virtual ExceptionOr<ByteArray> DispatchPacket() {
+    return ExceptionOr<ByteArray>{};
+  }
+
+  // Reads the length of the next incoming data packet from the underlying
+  // medium.
+  virtual ExceptionOr<std::int32_t> ReadPayloadLength() {
+    return ExceptionOr<std::int32_t>{0};
+  }
+
+  // Writes the length of a data packet to the underlying medium before writing
+  // the packet itself.
+  virtual Exception WritePayloadLength(int payload_length) {
+    return {Exception::kFailed};
+  }
 
  protected:
   virtual void CloseImpl() = 0;
@@ -140,7 +153,7 @@ class BaseEndpointChannel : public EndpointChannel {
   // An encryptor/decryptor. May be null.
   mutable Mutex crypto_mutex_;
   std::shared_ptr<EncryptionContext> crypto_context_
-      ABSL_GUARDED_BY(crypto_mutex_) ABSL_PT_GUARDED_BY(crypto_mutex_);
+      ABSL_GUARDED_BY(crypto_mutex_);
 
   mutable Mutex is_paused_mutex_;
   ConditionVariable is_paused_cond_{&is_paused_mutex_};

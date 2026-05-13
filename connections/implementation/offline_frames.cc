@@ -19,6 +19,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/strings/string_view.h"
 #include "connections/connection_options.h"
 #include "connections/implementation/flags/nearby_connections_feature_flags.h"
 #include "connections/implementation/internal_payload.h"
@@ -27,40 +28,33 @@
 #include "connections/medium_selector.h"
 #include "connections/status.h"
 #include "internal/flags/nearby_flags.h"
-#include "internal/platform/byte_array.h"
 #include "internal/platform/exception.h"
+#include "internal/platform/logging.h"
+#include "internal/platform/mac_address.h"
+#include "internal/platform/service_address.h"
 
-namespace nearby {
-namespace connections {
-namespace parser {
+namespace nearby::connections::parser {
 namespace {
 
 using ExceptionOrOfflineFrame =
     ExceptionOr<::location::nearby::connections::OfflineFrame>;
-using ::location::nearby::connections::AutoReconnectFrame;
 using ::location::nearby::connections::BandwidthUpgradeNegotiationFrame;
 using ::location::nearby::connections::ConnectionRequestFrame;
 using ::location::nearby::connections::ConnectionResponseFrame;
 using ::location::nearby::connections::KeepAliveFrame;
 using ::location::nearby::connections::LocationHint;
+using ::location::nearby::connections::MediumRole;
 using ::location::nearby::connections::OfflineFrame;
 using ::location::nearby::connections::OsInfo;
 using ::location::nearby::connections::PayloadTransferFrame;
 using ::location::nearby::connections::V1Frame;
 
-ByteArray ToBytes(OfflineFrame&& frame) {
-  ByteArray bytes(frame.ByteSizeLong());
-  frame.set_version(OfflineFrame::V1);
-  frame.SerializeToArray(bytes.data(), bytes.size());
-  return bytes;
-}
-
 }  // namespace
 
-ExceptionOrOfflineFrame FromBytes(const ByteArray& bytes) {
+ExceptionOrOfflineFrame FromBytes(absl::string_view bytes) {
   OfflineFrame frame;
 
-  if (frame.ParseFromString(std::string(bytes))) {
+  if (frame.ParseFromString(bytes)) {
     Exception validation_exception = EnsureValidOfflineFrame(frame);
     if (validation_exception.Raised()) {
       return ExceptionOrOfflineFrame(validation_exception);
@@ -79,10 +73,10 @@ V1Frame::FrameType GetFrameType(const OfflineFrame& frame) {
   return V1Frame::UNKNOWN_FRAME_TYPE;
 }
 
-ByteArray ForConnectionRequestConnections(
+std::string ForConnectionRequestConnections(
     const location::nearby::connections::ConnectionsDevice&
         proto_connections_device,
-    const ConnectionInfo& conection_info) {
+    const ConnectionInfo& connection_info) {
   OfflineFrame frame;
 
   frame.set_version(OfflineFrame::V1);
@@ -93,41 +87,55 @@ ByteArray ForConnectionRequestConnections(
     connection_request->mutable_connections_device()->MergeFrom(
         proto_connections_device);
   }
-  if (!conection_info.local_endpoint_id.empty()) {
-    connection_request->set_endpoint_id(conection_info.local_endpoint_id);
+  if (!connection_info.local_endpoint_id.empty()) {
+    connection_request->set_endpoint_id(connection_info.local_endpoint_id);
   }
-  if (!conection_info.local_endpoint_info.Empty()) {
+  if (!connection_info.local_endpoint_info.Empty()) {
     connection_request->set_endpoint_name(
-        conection_info.local_endpoint_info.string_data());
+        connection_info.local_endpoint_info.string_data());
     connection_request->set_endpoint_info(
-        conection_info.local_endpoint_info.string_data());
+        connection_info.local_endpoint_info.string_data());
   }
-  connection_request->set_nonce(conection_info.nonce);
+  connection_request->set_nonce(connection_info.nonce);
   auto* medium_metadata = connection_request->mutable_medium_metadata();
-  medium_metadata->set_supports_5_ghz(conection_info.supports_5_ghz);
-  if (!conection_info.bssid.empty())
-    medium_metadata->set_bssid(conection_info.bssid);
-  medium_metadata->set_ap_frequency(conection_info.ap_frequency);
-  if (!conection_info.ip_address.empty())
-    medium_metadata->set_ip_address(conection_info.ip_address);
-  if (!conection_info.supported_mediums.empty()) {
-    for (const auto& medium : conection_info.supported_mediums) {
+  medium_metadata->set_supports_5_ghz(connection_info.supports_5_ghz);
+  if (!connection_info.bssid.empty())
+    medium_metadata->set_bssid(connection_info.bssid);
+  medium_metadata->set_ap_frequency(connection_info.ap_frequency);
+  // Do not set ip_address in metadata since we don't know which interface or
+  // address family will be used for connection.
+  if (NearbyFlags::GetInstance().GetBoolFlag(
+          config_package_nearby::nearby_connections_feature::
+              kEnableDynamicRoleSwitch) &&
+      connection_info.medium_role.has_value()) {
+    medium_metadata->mutable_medium_role()->MergeFrom(
+        connection_info.medium_role.value());
+  }
+  if (!connection_info.supported_wifi_direct_auth_types.empty()) {
+    for (const auto& auth_type :
+         connection_info.supported_wifi_direct_auth_types) {
+      medium_metadata->add_supported_wifi_direct_auth_types(
+          WFDAuthTypeToMediumMetadataWFDAuthType(auth_type));
+    }
+  }
+  if (!connection_info.supported_mediums.empty()) {
+    for (const auto& medium : connection_info.supported_mediums) {
       connection_request->add_mediums(MediumToConnectionRequestMedium(medium));
     }
   }
-  if (conection_info.keep_alive_interval_millis > 0) {
+  if (connection_info.keep_alive_interval_millis > 0) {
     connection_request->set_keep_alive_interval_millis(
-        conection_info.keep_alive_interval_millis);
+        connection_info.keep_alive_interval_millis);
   }
-  if (conection_info.keep_alive_timeout_millis > 0) {
+  if (connection_info.keep_alive_timeout_millis > 0) {
     connection_request->set_keep_alive_timeout_millis(
-        conection_info.keep_alive_timeout_millis);
+        connection_info.keep_alive_timeout_millis);
   }
 
-  return ToBytes(std::move(frame));
+  return frame.SerializeAsString();
 }
 
-ByteArray ForConnectionRequestPresence(
+std::string ForConnectionRequestPresence(
     const location::nearby::connections::PresenceDevice& proto_presence_device,
     const ConnectionInfo& connection_info) {
   OfflineFrame frame;
@@ -153,8 +161,8 @@ ByteArray ForConnectionRequestPresence(
   if (!connection_info.bssid.empty())
     medium_metadata->set_bssid(connection_info.bssid);
   medium_metadata->set_ap_frequency(connection_info.ap_frequency);
-  if (!connection_info.ip_address.empty())
-    medium_metadata->set_ip_address(connection_info.ip_address);
+  // Do not set ip_address in metadata since we don't know which interface or
+  // address family will be used for connection.
   if (!connection_info.supported_mediums.empty()) {
     for (const auto& medium : connection_info.supported_mediums) {
       connection_request->add_mediums(MediumToConnectionRequestMedium(medium));
@@ -169,10 +177,10 @@ ByteArray ForConnectionRequestPresence(
         connection_info.keep_alive_timeout_millis);
   }
 
-  return ToBytes(std::move(frame));
+  return frame.SerializeAsString();
 }
 
-ByteArray ForConnectionResponse(std::int32_t status, const OsInfo& os_info,
+std::string ForConnectionResponse(std::int32_t status, const OsInfo& os_info,
                                 std::int32_t multiplex_socket_bitmask) {
   OfflineFrame frame;
 
@@ -195,10 +203,10 @@ ByteArray ForConnectionResponse(std::int32_t status, const OsInfo& os_info,
           config_package_nearby::nearby_connections_feature::
               kSafeToDisconnectVersion));
 
-  return ToBytes(std::move(frame));
+  return frame.SerializeAsString();
 }
 
-ByteArray ForDataPayloadTransfer(
+std::string ForDataPayloadTransfer(
     const PayloadTransferFrame::PayloadHeader& header,
     const PayloadTransferFrame::PayloadChunk& chunk) {
   OfflineFrame frame;
@@ -211,10 +219,10 @@ ByteArray ForDataPayloadTransfer(
   *sub_frame->mutable_payload_header() = header;
   *sub_frame->mutable_payload_chunk() = chunk;
 
-  return ToBytes(std::move(frame));
+  return frame.SerializeAsString();
 }
 
-ByteArray ForControlPayloadTransfer(
+std::string ForControlPayloadTransfer(
     const PayloadTransferFrame::PayloadHeader& header,
     const PayloadTransferFrame::ControlMessage& control) {
   OfflineFrame frame;
@@ -227,10 +235,10 @@ ByteArray ForControlPayloadTransfer(
   *sub_frame->mutable_payload_header() = header;
   *sub_frame->mutable_control_message() = control;
 
-  return ToBytes(std::move(frame));
+  return frame.SerializeAsString();
 }
 
-ByteArray ForPayloadAckPayloadTransfer(std::int64_t payload_id) {
+std::string ForPayloadAckPayloadTransfer(std::int64_t payload_id) {
   OfflineFrame frame;
 
   frame.set_version(OfflineFrame::V1);
@@ -244,15 +252,13 @@ ByteArray ForPayloadAckPayloadTransfer(std::int64_t payload_id) {
   header.set_total_size(InternalPayload::kIndeterminateSize);
   *sub_frame->mutable_payload_header() = header;
 
-  return ToBytes(std::move(frame));
+  return frame.SerializeAsString();
 }
 
-ByteArray ForBwuWifiHotspotPathAvailable(const std::string& ssid,
-                                         const std::string& password,
-                                         std::int32_t port,
-                                         std::int32_t frequency,
-                                         const std::string& gateway,
-                                         bool supports_disabling_encryption) {
+std::string ForBwuWifiHotspotPathAvailable(
+    BandwidthUpgradeNegotiationFrame::UpgradePathInfo::WifiHotspotCredentials
+        credentials,
+    bool supports_disabling_encryption) {
   OfflineFrame frame;
 
   frame.set_version(OfflineFrame::V1);
@@ -268,17 +274,12 @@ ByteArray ForBwuWifiHotspotPathAvailable(const std::string& ssid,
       supports_disabling_encryption);
   auto* wifi_hotspot_credentials =
       upgrade_path_info->mutable_wifi_hotspot_credentials();
-  wifi_hotspot_credentials->set_ssid(ssid);
-  wifi_hotspot_credentials->set_password(password);
-  wifi_hotspot_credentials->set_port(port);
-  wifi_hotspot_credentials->set_frequency(frequency);
-  wifi_hotspot_credentials->set_gateway(gateway);
-
-  return ToBytes(std::move(frame));
+  *wifi_hotspot_credentials = std::move(credentials);
+  return frame.SerializeAsString();
 }
 
-ByteArray ForBwuWifiLanPathAvailable(const std::string& ip_address,
-                                     std::int32_t port) {
+std::string ForBwuWifiLanPathAvailable(
+    const std::vector<ServiceAddress>& addresses) {
   OfflineFrame frame;
 
   frame.set_version(OfflineFrame::V1);
@@ -291,13 +292,50 @@ ByteArray ForBwuWifiLanPathAvailable(const std::string& ip_address,
   upgrade_path_info->set_medium(UpgradePathInfo::WIFI_LAN);
   upgrade_path_info->set_supports_client_introduction_ack(true);
   auto* wifi_lan_socket = upgrade_path_info->mutable_wifi_lan_socket();
-  wifi_lan_socket->set_ip_address(ip_address);
-  wifi_lan_socket->set_wifi_port(port);
-
-  return ToBytes(std::move(frame));
+  if (!addresses.empty()) {
+    // For compatibility with Android versions, only use IPv4 address.
+    // IPv4 addresses are always at the end of the list.
+    const auto& last_address = addresses.back();
+    if (last_address.address.size() == 4) {
+      wifi_lan_socket->set_ip_address(std::string(last_address.address.begin(),
+                                                  last_address.address.end()));
+      wifi_lan_socket->set_wifi_port(last_address.port);
+    }
+    for (const auto& address : addresses) {
+      ServiceAddressToProto(address,
+                            *(wifi_lan_socket->add_address_candidates()));
+      VLOG(1) << "ForBwuWifiLanPathAvailable: " << address;
+    }
+  }
+  return frame.SerializeAsString();
 }
 
-ByteArray ForBwuWifiAwarePathAvailable(const std::string& service_id,
+std::string ForBwuAwdlPathAvailable(const std::string& service_name,
+                                  const std::string& service_type,
+                                  const std::string& password,
+                                  bool supports_disabling_encryption) {
+  OfflineFrame frame;
+
+  frame.set_version(OfflineFrame::V1);
+  auto* v1_frame = frame.mutable_v1();
+  v1_frame->set_type(V1Frame::BANDWIDTH_UPGRADE_NEGOTIATION);
+  auto* sub_frame = v1_frame->mutable_bandwidth_upgrade_negotiation();
+  sub_frame->set_event_type(
+      BandwidthUpgradeNegotiationFrame::UPGRADE_PATH_AVAILABLE);
+  auto* upgrade_path_info = sub_frame->mutable_upgrade_path_info();
+  upgrade_path_info->set_medium(UpgradePathInfo::AWDL);
+  upgrade_path_info->set_supports_client_introduction_ack(true);
+  upgrade_path_info->set_supports_disabling_encryption(
+      supports_disabling_encryption);
+  auto* awdl_socket = upgrade_path_info->mutable_awdl_credentials();
+  awdl_socket->set_service_name(service_name);
+  awdl_socket->set_service_type(service_type);
+  awdl_socket->set_password(password);
+
+  return frame.SerializeAsString();
+}
+
+std::string ForBwuWifiAwarePathAvailable(const std::string& service_id,
                                        const std::string& service_info,
                                        const std::string& password,
                                        bool supports_disabling_encryption) {
@@ -320,15 +358,14 @@ ByteArray ForBwuWifiAwarePathAvailable(const std::string& service_id,
   wifi_aware_credentials->set_service_info(service_info);
   if (!password.empty()) wifi_aware_credentials->set_password(password);
 
-  return ToBytes(std::move(frame));
+  return frame.SerializeAsString();
 }
 
-ByteArray ForBwuWifiDirectPathAvailable(const std::string& ssid,
-                                        const std::string& password,
-                                        std::int32_t port,
-                                        std::int32_t frequency,
-                                        bool supports_disabling_encryption,
-                                        const std::string& gateway) {
+std::string ForBwuWifiDirectPathAvailable(
+    const std::string& ssid, const std::string& password, std::int32_t port,
+    std::int32_t frequency, bool supports_disabling_encryption,
+    const std::string& gateway, const std::string& service_name,
+    const std::string& pin) {
   OfflineFrame frame;
 
   frame.set_version(OfflineFrame::V1);
@@ -349,12 +386,14 @@ ByteArray ForBwuWifiDirectPathAvailable(const std::string& ssid,
   wifi_direct_credentials->set_port(port);
   wifi_direct_credentials->set_frequency(frequency);
   wifi_direct_credentials->set_gateway(gateway);
+  wifi_direct_credentials->set_service_name(service_name);
+  wifi_direct_credentials->set_pin(pin);
 
-  return ToBytes(std::move(frame));
+  return frame.SerializeAsString();
 }
 
-ByteArray ForBwuBluetoothPathAvailable(const std::string& service_id,
-                                       const std::string& mac_address) {
+std::string ForBwuBluetoothPathAvailable(const std::string& service_id,
+                                       MacAddress mac_address) {
   OfflineFrame frame;
 
   frame.set_version(OfflineFrame::V1);
@@ -368,13 +407,13 @@ ByteArray ForBwuBluetoothPathAvailable(const std::string& service_id,
   upgrade_path_info->set_supports_client_introduction_ack(true);
   auto* bluetooth_credentials =
       upgrade_path_info->mutable_bluetooth_credentials();
-  bluetooth_credentials->set_mac_address(mac_address);
+  bluetooth_credentials->set_mac_address(mac_address.ToString());
   bluetooth_credentials->set_service_name(service_id);
 
-  return ToBytes(std::move(frame));
+  return frame.SerializeAsString();
 }
 
-ByteArray ForBwuWebrtcPathAvailable(const std::string& peer_id,
+std::string ForBwuWebrtcPathAvailable(const std::string& peer_id,
                                     const LocationHint& location_hint) {
   OfflineFrame frame;
 
@@ -392,10 +431,10 @@ ByteArray ForBwuWebrtcPathAvailable(const std::string& peer_id,
   auto* local_location_hint = webrtc_credentials->mutable_location_hint();
   *local_location_hint = location_hint;
 
-  return ToBytes(std::move(frame));
+  return frame.SerializeAsString();
 }
 
-ByteArray ForBwuLastWrite() {
+std::string ForBwuLastWrite() {
   OfflineFrame frame;
 
   frame.set_version(OfflineFrame::V1);
@@ -405,10 +444,10 @@ ByteArray ForBwuLastWrite() {
   sub_frame->set_event_type(
       BandwidthUpgradeNegotiationFrame::LAST_WRITE_TO_PRIOR_CHANNEL);
 
-  return ToBytes(std::move(frame));
+  return frame.SerializeAsString();
 }
 
-ByteArray ForBwuSafeToClose() {
+std::string ForBwuSafeToClose() {
   OfflineFrame frame;
 
   frame.set_version(OfflineFrame::V1);
@@ -418,10 +457,10 @@ ByteArray ForBwuSafeToClose() {
   sub_frame->set_event_type(
       BandwidthUpgradeNegotiationFrame::SAFE_TO_CLOSE_PRIOR_CHANNEL);
 
-  return ToBytes(std::move(frame));
+  return frame.SerializeAsString();
 }
 
-ByteArray ForBwuIntroduction(const std::string& endpoint_id,
+std::string ForBwuIntroduction(const std::string& endpoint_id,
                              bool supports_disabling_encryption) {
   OfflineFrame frame;
 
@@ -436,10 +475,10 @@ ByteArray ForBwuIntroduction(const std::string& endpoint_id,
   client_introduction->set_supports_disabling_encryption(
       supports_disabling_encryption);
 
-  return ToBytes(std::move(frame));
+  return frame.SerializeAsString();
 }
 
-ByteArray ForBwuIntroductionAck() {
+std::string ForBwuIntroductionAck() {
   OfflineFrame frame;
 
   frame.set_version(OfflineFrame::V1);
@@ -449,10 +488,10 @@ ByteArray ForBwuIntroductionAck() {
   sub_frame->set_event_type(
       BandwidthUpgradeNegotiationFrame::CLIENT_INTRODUCTION_ACK);
 
-  return ToBytes(std::move(frame));
+  return frame.SerializeAsString();
 }
 
-ByteArray ForBwuFailure(const UpgradePathInfo& info) {
+std::string ForBwuFailure(const UpgradePathInfo& info) {
   OfflineFrame frame;
 
   frame.set_version(OfflineFrame::V1);
@@ -463,10 +502,34 @@ ByteArray ForBwuFailure(const UpgradePathInfo& info) {
   auto* upgrade_path_info = sub_frame->mutable_upgrade_path_info();
   *upgrade_path_info = info;
 
-  return ToBytes(std::move(frame));
+  *sub_frame->mutable_upgrade_path_info() = info;
+
+  return frame.SerializeAsString();
 }
 
-ByteArray ForKeepAlive() {
+std::string ForBwuPathRequest(const std::vector<Medium>& mediums,
+                            const MediumRole& medium_role) {
+  OfflineFrame frame;
+
+  frame.set_version(OfflineFrame::V1);
+  auto* v1_frame = frame.mutable_v1();
+  v1_frame->set_type(V1Frame::BANDWIDTH_UPGRADE_NEGOTIATION);
+  auto* sub_frame = v1_frame->mutable_bandwidth_upgrade_negotiation();
+  sub_frame->set_event_type(
+      BandwidthUpgradeNegotiationFrame::UPGRADE_PATH_REQUEST);
+  auto* upgrade_path_request =
+      sub_frame->mutable_upgrade_path_info()->mutable_upgrade_path_request();
+  for (const auto& medium : mediums) {
+    upgrade_path_request->add_mediums(MediumToUpgradePathInfoMedium(medium));
+  }
+  auto* role =
+      upgrade_path_request->mutable_medium_meta_data()->mutable_medium_role();
+  role->MergeFrom(medium_role);
+
+  return frame.SerializeAsString();
+}
+
+std::string ForKeepAlive() {
   OfflineFrame frame;
 
   frame.set_version(OfflineFrame::V1);
@@ -474,10 +537,10 @@ ByteArray ForKeepAlive() {
   v1_frame->set_type(V1Frame::KEEP_ALIVE);
   v1_frame->mutable_keep_alive();
 
-  return ToBytes(std::move(frame));
+  return frame.SerializeAsString();
 }
 
-ByteArray ForKeepAlive(bool ack, uint32_t seq_num) {
+std::string ForKeepAlive(bool ack, uint32_t seq_num) {
   OfflineFrame frame;
 
   frame.set_version(OfflineFrame::V1);
@@ -486,10 +549,10 @@ ByteArray ForKeepAlive(bool ack, uint32_t seq_num) {
   KeepAliveFrame* keep_alive = v1_frame->mutable_keep_alive();
   keep_alive->set_ack(ack);
   keep_alive->set_seq_num(seq_num);
-  return ToBytes(std::move(frame));
+  return frame.SerializeAsString();
 }
 
-ByteArray ForDisconnection(bool request_safe_to_disconnect,
+std::string ForDisconnection(bool request_safe_to_disconnect,
                            bool ack_safe_to_disconnect) {
   OfflineFrame frame;
 
@@ -500,33 +563,9 @@ ByteArray ForDisconnection(bool request_safe_to_disconnect,
   disconnection->set_request_safe_to_disconnect(request_safe_to_disconnect);
   disconnection->set_ack_safe_to_disconnect(ack_safe_to_disconnect);
 
-  return ToBytes(std::move(frame));
+  return frame.SerializeAsString();
 }
 
-ByteArray ForAutoReconnectIntroduction(const std::string& endpoint_id) {
-  OfflineFrame frame;
-
-  frame.set_version(OfflineFrame::V1);
-  auto* v1_frame = frame.mutable_v1();
-  v1_frame->set_type(V1Frame::AUTO_RECONNECT);
-  auto* auto_reconnect = v1_frame->mutable_auto_reconnect();
-  auto_reconnect->set_endpoint_id(endpoint_id);
-  auto_reconnect->set_event_type(AutoReconnectFrame::CLIENT_INTRODUCTION);
-
-  return ToBytes(std::move(frame));
-}
-
-ByteArray ForAutoReconnectIntroductionAck() {
-  OfflineFrame frame;
-
-  frame.set_version(OfflineFrame::V1);
-  auto* v1_frame = frame.mutable_v1();
-  v1_frame->set_type(V1Frame::AUTO_RECONNECT);
-  auto* auto_reconnect = v1_frame->mutable_auto_reconnect();
-  auto_reconnect->set_event_type(AutoReconnectFrame::CLIENT_INTRODUCTION_ACK);
-
-  return ToBytes(std::move(frame));
-}
 
 UpgradePathInfo::Medium MediumToUpgradePathInfoMedium(Medium medium) {
   switch (medium) {
@@ -550,6 +589,10 @@ UpgradePathInfo::Medium MediumToUpgradePathInfoMedium(Medium medium) {
       return UpgradePathInfo::WEB_RTC;
     case Medium::WEB_RTC_NON_CELLULAR:
       return UpgradePathInfo::WEB_RTC_NON_CELLULAR;
+    case Medium::USB:
+      return UpgradePathInfo::USB;
+    case Medium::AWDL:
+      return UpgradePathInfo::AWDL;
     default:
       return UpgradePathInfo::UNKNOWN_MEDIUM;
   }
@@ -577,6 +620,10 @@ Medium UpgradePathInfoMediumToMedium(UpgradePathInfo::Medium medium) {
       return Medium::WEB_RTC;
     case UpgradePathInfo::WEB_RTC_NON_CELLULAR:
       return Medium::WEB_RTC_NON_CELLULAR;
+    case UpgradePathInfo::USB:
+      return Medium::USB;
+    case UpgradePathInfo::AWDL:
+      return Medium::AWDL;
     default:
       return Medium::UNKNOWN_MEDIUM;
   }
@@ -592,6 +639,8 @@ ConnectionRequestFrame::Medium MediumToConnectionRequestMedium(Medium medium) {
       return ConnectionRequestFrame::WIFI_HOTSPOT;
     case Medium::BLE:
       return ConnectionRequestFrame::BLE;
+    case Medium::BLE_L2CAP:
+      return ConnectionRequestFrame::BLE_L2CAP;
     case Medium::WIFI_LAN:
       return ConnectionRequestFrame::WIFI_LAN;
     case Medium::WIFI_AWARE:
@@ -604,6 +653,10 @@ ConnectionRequestFrame::Medium MediumToConnectionRequestMedium(Medium medium) {
       return ConnectionRequestFrame::WEB_RTC;
     case Medium::WEB_RTC_NON_CELLULAR:
       return ConnectionRequestFrame::WEB_RTC_NON_CELLULAR;
+    case Medium::USB:
+      return ConnectionRequestFrame::USB;
+    case Medium::AWDL:
+      return ConnectionRequestFrame::AWDL;
     default:
       return ConnectionRequestFrame::UNKNOWN_MEDIUM;
   }
@@ -619,6 +672,8 @@ Medium ConnectionRequestMediumToMedium(ConnectionRequestFrame::Medium medium) {
       return Medium::WIFI_HOTSPOT;
     case ConnectionRequestFrame::BLE:
       return Medium::BLE;
+    case ConnectionRequestFrame::BLE_L2CAP:
+      return Medium::BLE_L2CAP;
     case ConnectionRequestFrame::WIFI_LAN:
       return Medium::WIFI_LAN;
     case ConnectionRequestFrame::WIFI_AWARE:
@@ -631,6 +686,10 @@ Medium ConnectionRequestMediumToMedium(ConnectionRequestFrame::Medium medium) {
       return Medium::WEB_RTC;
     case ConnectionRequestFrame::WEB_RTC_NON_CELLULAR:
       return Medium::WEB_RTC_NON_CELLULAR;
+    case ConnectionRequestFrame::USB:
+      return Medium::USB;
+    case ConnectionRequestFrame::AWDL:
+      return Medium::AWDL;
     default:
       return Medium::UNKNOWN_MEDIUM;
   }
@@ -646,6 +705,42 @@ std::vector<Medium> ConnectionRequestMediumsToMediums(
   return result;
 }
 
-}  // namespace parser
-}  // namespace connections
-}  // namespace nearby
+MediumMetadata::WifiDirectAuthType WFDAuthTypeToMediumMetadataWFDAuthType(
+    WifiDirectAuthType wifi_direct_auth_type) {
+  switch (wifi_direct_auth_type) {
+    case WifiDirectAuthType::WIFI_DIRECT_WITH_PASSWORD:
+      return MediumMetadata::WIFI_DIRECT_WITH_PASSWORD;
+    case WifiDirectAuthType::WIFI_DIRECT_WITH_PIN:
+      return MediumMetadata::WIFI_DIRECT_WITH_PIN;
+    default:
+      return MediumMetadata::WIFI_DIRECT_TYPE_UNKNOWN;
+  }
+}
+
+WifiDirectAuthType MediumMetadataWFDAuthTypeToWFDAuthType(
+    MediumMetadata::WifiDirectAuthType wifi_direct_auth_type) {
+  switch (wifi_direct_auth_type) {
+    case MediumMetadata::WIFI_DIRECT_WITH_PASSWORD:
+      return WifiDirectAuthType::WIFI_DIRECT_WITH_PASSWORD;
+    case MediumMetadata::WIFI_DIRECT_WITH_PIN:
+      return WifiDirectAuthType::WIFI_DIRECT_WITH_PIN;
+    default:
+      return WifiDirectAuthType::WIFI_DIRECT_TYPE_UNKNOWN;
+  }
+}
+
+std::vector<WifiDirectAuthType> MediumMetadataWFDAuthTypesToWFDAuthTypes(
+    const MediumMetadata& medium_metadata) {
+  std::vector<WifiDirectAuthType> result;
+  for (const auto& int_wifi_direct_auth_type :
+       medium_metadata.supported_wifi_direct_auth_types()) {
+    // The int_wifi_direct_auth_type is guaranteed to be a valid
+    // MediumMetadata::WifiDirectAuthType by the proto spec.
+    result.push_back(MediumMetadataWFDAuthTypeToWFDAuthType(
+        static_cast<MediumMetadata::WifiDirectAuthType>(
+            int_wifi_direct_auth_type)));
+  }
+  return result;
+}
+
+}  // namespace nearby::connections::parser

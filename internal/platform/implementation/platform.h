@@ -15,39 +15,36 @@
 #ifndef PLATFORM_API_PLATFORM_H_
 #define PLATFORM_API_PLATFORM_H_
 
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "internal/platform/implementation/app_lifecycle_monitor.h"
 #include "internal/platform/implementation/atomic_boolean.h"
 #include "internal/platform/implementation/atomic_reference.h"
+#include "internal/platform/implementation/awdl.h"
 #include "internal/platform/implementation/ble.h"
-#include "internal/platform/implementation/ble_v2.h"
 #include "internal/platform/implementation/bluetooth_adapter.h"
 #include "internal/platform/implementation/bluetooth_classic.h"
 #include "internal/platform/implementation/condition_variable.h"
 #include "internal/platform/implementation/count_down_latch.h"
 #include "internal/platform/implementation/credential_storage.h"
-#include "internal/platform/implementation/crypto.h"
 #include "internal/platform/implementation/device_info.h"
 #include "internal/platform/implementation/http_loader.h"
 #include "internal/platform/implementation/input_file.h"
 #include "internal/platform/implementation/log_message.h"
 #include "internal/platform/implementation/mutex.h"
 #include "internal/platform/implementation/output_file.h"
+#include "internal/platform/implementation/preferences_manager.h"
 #include "internal/platform/implementation/scheduled_executor.h"
-#include "internal/platform/implementation/server_sync.h"
-#include "internal/platform/implementation/settable_future.h"
 #include "internal/platform/implementation/submittable_executor.h"
-#include "internal/platform/implementation/system_clock.h"
 #include "internal/platform/implementation/timer.h"
 #ifndef NO_WEBRTC
 #include "internal/platform/implementation/webrtc.h"
-#endif
-#ifndef NEARBY_CHROMIUM
-#include "internal/platform/implementation/preferences_manager.h"
 #endif
 #include "internal/platform/implementation/wifi.h"
 #include "internal/platform/implementation/wifi_direct.h"
@@ -68,7 +65,6 @@ class ImplementationPlatform {
   // - synchronization primitives:
   //   - mutex (regular, and recursive)
   //   - condition variable (must work with regular mutex only)
-  //   - Future<T> : to synchronize on Callable<T> scheduled to execute.
   //   - CountDownLatch : to ensure at least N threads are waiting.
   // - file I/O
   // - Logging
@@ -108,9 +104,9 @@ class ImplementationPlatform {
   static std::unique_ptr<ConditionVariable> CreateConditionVariable(
       Mutex* mutex);
 
-  static std::unique_ptr<InputFile> CreateInputFile(PayloadId, std::int64_t);
+  static std::unique_ptr<InputFile> CreateInputFile(PayloadId);
 
-  static std::unique_ptr<InputFile> CreateInputFile(const std::string&, size_t);
+  static std::unique_ptr<InputFile> CreateInputFile(const std::string&);
 
   static std::unique_ptr<OutputFile> CreateOutputFile(PayloadId);
 
@@ -126,23 +122,39 @@ class ImplementationPlatform {
   static std::unique_ptr<ScheduledExecutor> CreateScheduledExecutor();
 
   // Protocol implementations, domain-specific support
+  static std::unique_ptr<AwdlMedium> CreateAwdlMedium();
   static std::unique_ptr<BluetoothAdapter> CreateBluetoothAdapter();
   static std::unique_ptr<BluetoothClassicMedium> CreateBluetoothClassicMedium(
       BluetoothAdapter&);
-  static std::unique_ptr<BleMedium> CreateBleMedium(BluetoothAdapter&);
-  static std::unique_ptr<api::ble_v2::BleMedium> CreateBleV2Medium(
+  static std::unique_ptr<api::ble::BleMedium> CreateBleMedium(
       api::BluetoothAdapter&);
   static std::unique_ptr<api::CredentialStorage> CreateCredentialStorage();
-  static std::unique_ptr<ServerSyncMedium> CreateServerSyncMedium();
   static std::unique_ptr<WifiMedium> CreateWifiMedium();
   static std::unique_ptr<WifiLanMedium> CreateWifiLanMedium();
   static std::unique_ptr<WifiHotspotMedium> CreateWifiHotspotMedium();
   static std::unique_ptr<WifiDirectMedium> CreateWifiDirectMedium();
   static std::unique_ptr<Timer> CreateTimer();
-  static std::unique_ptr<DeviceInfo> CreateDeviceInfo();
 #ifndef NO_WEBRTC
   static std::unique_ptr<WebRtcMedium> CreateWebRtcMedium();
 #endif
+
+#if defined(NEARBY_CHROMIUM)
+  static std::unique_ptr<AppLifecycleMonitor> CreateAppLifecycleMonitor(
+      std::function<void(AppLifecycleMonitor::AppLifecycleState)>
+          state_updated_callback) {
+    return nullptr;
+  }
+  static std::unique_ptr<nearby::api::PreferencesManager>
+  CreatePreferencesManager(absl::string_view path) {
+    return nullptr;
+  }
+#else
+  static std::unique_ptr<AppLifecycleMonitor> CreateAppLifecycleMonitor(
+      std::function<void(AppLifecycleMonitor::AppLifecycleState)>
+          state_updated_callback);
+  static std::unique_ptr<nearby::api::PreferencesManager>
+  CreatePreferencesManager(absl::string_view path);
+  static std::unique_ptr<DeviceInfo> CreateDeviceInfo();
 
   // Gets HTTP response from remote server.
   //
@@ -152,10 +164,6 @@ class ImplementationPlatform {
   //         return WebResponse if HTTP status code between 200 and 300.
   //         other cases will return absl Status in error.
   static absl::StatusOr<WebResponse> SendRequest(const WebRequest& request);
-
-#ifndef NEARBY_CHROMIUM
-  static std::unique_ptr<nearby::api::PreferencesManager>
-  CreatePreferencesManager(absl::string_view path);
 #endif
 };
 

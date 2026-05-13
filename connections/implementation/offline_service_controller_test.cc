@@ -33,9 +33,12 @@
 #include "connections/payload.h"
 #include "connections/status.h"
 #include "connections/strategy.h"
+#include "connections/v3/connection_listening_options.h"
+#include "connections/v3/listeners.h"
 #include "internal/flags/nearby_flags.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/count_down_latch.h"
+#include "internal/platform/implementation/system_clock.h"
 #include "internal/platform/input_stream.h"
 #include "internal/platform/logging.h"
 #include "internal/platform/medium_environment.h"
@@ -94,10 +97,9 @@ class OfflineServiceControllerTest
  protected:
   void SetUp() override {
     NearbyFlags::GetInstance().OverrideBoolFlagValue(
-        config_package_nearby::nearby_connections_feature::kEnableBleV2, true);
-    NearbyFlags::GetInstance().OverrideBoolFlagValue(
         config_package_nearby::nearby_connections_feature::
-            kEnableSafeToDisconnect, false);
+            kEnableSafeToDisconnect,
+        false);
   }
   bool SetupConnection(OfflineSimulationUser& user_a,
                        OfflineSimulationUser& user_b) {
@@ -107,18 +109,16 @@ class OfflineServiceControllerTest
     EXPECT_EQ(user_b.GetDiscovered().service_id, kServiceId);
     EXPECT_EQ(user_b.GetDiscovered().endpoint_info, user_a.GetInfo());
     EXPECT_FALSE(user_b.GetDiscovered().endpoint_id.empty());
-    NEARBY_LOGS(INFO) << "EP-B: [discovered] "
-                      << user_b.GetDiscovered().endpoint_id;
+    LOG(INFO) << "EP-B: [discovered] " << user_b.GetDiscovered().endpoint_id;
     user_b.RequestConnection(&connect_latch_);
     EXPECT_TRUE(connect_latch_.Await(kLongTimeout));
     EXPECT_FALSE(user_a.GetDiscovered().endpoint_id.empty());
-    NEARBY_LOGS(INFO) << "EP-A: [discovered] "
-                      << user_a.GetDiscovered().endpoint_id;
-    NEARBY_LOGS(INFO) << "Both users discovered their peers.";
+    LOG(INFO) << "EP-A: [discovered] " << user_a.GetDiscovered().endpoint_id;
+    LOG(INFO) << "Both users discovered their peers.";
     user_a.AcceptConnection(&accept_latch_);
     user_b.AcceptConnection(&accept_latch_);
     EXPECT_TRUE(accept_latch_.Await(kLongTimeout));
-    NEARBY_LOGS(INFO) << "Both users reached connected state.";
+    LOG(INFO) << "Both users reached connected state.";
     return user_a.IsConnected() && user_b.IsConnected();
   }
 
@@ -336,19 +336,18 @@ TEST_P(OfflineServiceControllerTest, CanSendStreamPayload) {
   OfflineSimulationUser user_b(kDeviceB, GetParam());
   user_b.ExpectPayload(payload_latch_);
   ASSERT_TRUE(SetupConnection(user_a, user_b));
-  ByteArray message(std::string{kMessage});
   auto [input, tx] = CreatePipe();
   user_a.SendPayload(Payload(std::move(input)));
-  tx->Write(message);
+  tx->Write(kMessage);
   EXPECT_TRUE(payload_latch_.Await(kLongTimeout));
   ASSERT_NE(user_b.GetPayload().AsStream(), nullptr);
   InputStream& rx = *user_b.GetPayload().AsStream();
   ASSERT_TRUE(user_b.WaitForProgress(
-      [size = message.size()](const PayloadProgressInfo& info) -> bool {
+      [size = kMessage.size()](const PayloadProgressInfo& info) -> bool {
         return info.bytes_transferred >= size;
       },
       kLongTimeout));
-  EXPECT_EQ(rx.Read(kChunkSize).result(), message);
+  EXPECT_EQ(rx.Read(kChunkSize).result().AsStringView(), kMessage);
   user_a.Stop();
   user_b.Stop();
   env_.Stop();
@@ -360,23 +359,22 @@ TEST_P(OfflineServiceControllerTest, CanCancelStreamPayload) {
   OfflineSimulationUser user_b(kDeviceB, GetParam());
   user_b.ExpectPayload(payload_latch_);
   ASSERT_TRUE(SetupConnection(user_a, user_b));
-  ByteArray message(std::string{kMessage});
   auto [input, tx] = CreatePipe();
   user_a.SendPayload(Payload(std::move(input)));
-  tx->Write(message);
+  tx->Write(kMessage);
   EXPECT_TRUE(payload_latch_.Await(kLongTimeout));
   ASSERT_NE(user_b.GetPayload().AsStream(), nullptr);
   InputStream& rx = *user_b.GetPayload().AsStream();
   ASSERT_TRUE(user_b.WaitForProgress(
-      [size = message.size()](const PayloadProgressInfo& info) -> bool {
+      [size = kMessage.size()](const PayloadProgressInfo& info) -> bool {
         return info.bytes_transferred >= size;
       },
       kLongTimeout));
-  EXPECT_EQ(rx.Read(kChunkSize).result(), message);
+  EXPECT_EQ(rx.Read(kChunkSize).result().AsStringView(), kMessage);
   user_b.CancelPayload();
   absl::Time start_time = SystemClock::ElapsedRealtime();
   while (true) {
-    if (!tx->Write(message).Ok()) break;
+    if (!tx->Write(kMessage).Ok()) break;
     absl::Duration run_time = SystemClock::ElapsedRealtime() - start_time;
     if (run_time >= kLongTimeout) {
       EXPECT_LT(run_time, kLongTimeout);
@@ -400,11 +398,11 @@ TEST_P(OfflineServiceControllerTest, CanDisconnect) {
   OfflineSimulationUser user_a(kDeviceA, GetParam());
   OfflineSimulationUser user_b(kDeviceB, GetParam());
   ASSERT_TRUE(SetupConnection(user_a, user_b));
-  NEARBY_LOGS(INFO) << "Disconnecting";
+  LOG(INFO) << "Disconnecting";
   user_b.ExpectDisconnect(disconnect_latch);
   user_b.Disconnect();
   EXPECT_TRUE(disconnect_latch.Await(kLongTimeout));
-  NEARBY_LOGS(INFO) << "Disconnected";
+  LOG(INFO) << "Disconnected";
   EXPECT_FALSE(user_b.IsConnected());
   user_a.Stop();
   user_b.Stop();
@@ -418,7 +416,7 @@ TEST_P(OfflineServiceControllerTest, TestUpdateAdvertisingOptions) {
   EXPECT_THAT(user_a.StartAdvertising(std::string(kServiceId), nullptr),
               Eq(Status{Status::kSuccess}));
   EXPECT_TRUE(user_a.IsAdvertising());
-  NEARBY_LOGS(INFO) << "Started advertising";
+  LOG(INFO) << "Started advertising";
   AdvertisingOptions new_options = {
       {
           Strategy::kP2pCluster,
@@ -431,9 +429,9 @@ TEST_P(OfflineServiceControllerTest, TestUpdateAdvertisingOptions) {
   EXPECT_THAT(user_a.UpdateAdvertisingOptions(kServiceId, new_options),
               Eq(Status{Status::kSuccess}));
   EXPECT_TRUE(user_a.IsAdvertising());
-  NEARBY_LOGS(INFO) << "Updated advertising options";
+  LOG(INFO) << "Updated advertising options";
   user_a.StopAdvertising();
-  NEARBY_LOGS(INFO) << "Stopped advertising";
+  LOG(INFO) << "Stopped advertising";
   user_a.Stop();
   env_.Stop();
 }
@@ -509,6 +507,63 @@ TEST_P(OfflineServiceControllerTest, TestNoUpdateDiscoveryOptionsAfterStop) {
   EXPECT_THAT(user_a.UpdateDiscoveryOptions(kServiceId, new_options),
               Eq(Status{Status::kOutOfOrderApiCall}));
   EXPECT_FALSE(user_a.IsDiscovering());
+  env_.Stop();
+}
+
+TEST_P(OfflineServiceControllerTest,
+       StartAndStopListeningForIncomingConnections) {
+  env_.Start();
+  OfflineSimulationUser user_a(kDeviceA, GetParam());
+  v3::ConnectionListener listener;
+  v3::ConnectionListeningOptions options;
+
+  // Test StartListeningForIncomingConnections
+  auto result = user_a.StartListeningForIncomingConnections(
+      std::string(kServiceId), listener, options);
+  EXPECT_EQ(result.first.Ok(), Status::kSuccess);
+  // In a real scenario, we'd verify that listening has started.
+  // Here, we just ensure the call doesn't fail.
+
+  // Test StopListeningForIncomingConnections
+  user_a.StopListeningForIncomingConnections();
+  // Verify that calling Stop after Start works.
+
+  user_a.Stop();
+  env_.Stop();
+}
+
+TEST_P(OfflineServiceControllerTest, InitiateBandwidthUpgrade) {
+  env_.Start();
+  OfflineSimulationUser user_a(kDeviceA, GetParam());
+  std::string endpoint_id = "test_endpoint";
+  // Verify that calling InitiateBandwidthUpgrade does not cause issues.
+  user_a.InitiateBandwidthUpgrade(endpoint_id);
+  // The effect of InitiateBwuForEndpoint is internal to BwuManager,
+  // so we primarily test that the call completes without error.
+  user_a.Stop();
+  env_.Stop();
+}
+
+TEST_P(OfflineServiceControllerTest, SetCustomSavePath) {
+  env_.Start();
+  OfflineSimulationUser user_a(kDeviceA, GetParam());
+  std::string test_path = "/tmp/nearby_test_path";
+  // Verify that calling SetCustomSavePath does not cause issues.
+  user_a.SetCustomSavePath(test_path);
+  // In a real scenario, we would verify that payloads are saved to this path,
+  // but OfflineSimulationUser doesn't expose this. The test ensures the call
+  // is handled.
+  user_a.Stop();
+  env_.Stop();
+}
+
+TEST_P(OfflineServiceControllerTest, ShutdownBwuManagerExecutors) {
+  env_.Start();
+  OfflineSimulationUser user_a(kDeviceA, GetParam());
+  // Verify that calling ShutdownBwuManagerExecutors does not cause issues.
+  user_a.ShutdownBwuManagerExecutors();
+  // This method is primarily for internal cleanup; we ensure it can be called.
+  user_a.Stop();
   env_.Stop();
 }
 

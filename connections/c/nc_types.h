@@ -15,6 +15,7 @@
 #ifndef THIRD_PARTY_NEARBY_CONNECTIONS_C_NC_TYPES_H_
 #define THIRD_PARTY_NEARBY_CONNECTIONS_C_NC_TYPES_H_
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -27,6 +28,8 @@ typedef void* NC_INSTANCE;
 typedef int64_t NC_PAYLOAD_ID;
 
 typedef void* CALLER_CONTEXT;
+
+typedef void* READER_CONTEXT;
 
 // NC_DATA is used to define a byte array. Its last byte is not zero.
 typedef struct NC_DATA {
@@ -48,7 +51,9 @@ typedef enum NC_MEDIUM {
   NC_MEDIUM_WEB_RTC = 9,
   NC_MEDIUM_BLE_L2CAP = 10,
   NC_MEDIUM_USB = 11,
-  NC_MEDIUM_MAX = 12
+  NC_MEDIUM_WEB_RTC_NON_CELLULAR = 12,
+  NC_MEDIUM_AWDL = 13,
+  NC_MEDIUM_MAX = 14
 } NC_MEDIUM;
 
 typedef enum NC_CONNECTION_TYPE {
@@ -103,8 +108,8 @@ typedef enum NC_STATUS {
 typedef enum NC_PAYLOAD_TYPE {
   NC_PAYLOAD_TYPE_UNKNOWN = 0,
   NC_PAYLOAD_TYPE_BYTES = 1,
-  NC_PAYLOAD_TYPE_STREAM = 2,
-  NC_PAYLOAD_TYPE_FILE = 3
+  NC_PAYLOAD_TYPE_FILE = 2,
+  NC_PAYLOAD_TYPE_STREAM = 3
 } NC_PAYLOAD_TYPE;
 
 typedef enum NC_PAYLOAD_DIRECTION {
@@ -300,6 +305,10 @@ typedef struct NC_OUT_OF_BAND_CONNECTION_METADATA {
   // generated such that no two IDs are identical.
   int endpoint_id;
 
+  //
+  // Properties for BLUETOOTH out-of-band connections.
+  //
+
   // Endpoint info to use for the injected connection; will be included in the
   // endpoint_found_cb callback. Should uniquely identify the InjectEndpoint()
   // call so that the client which made the call can verify the endpoint
@@ -310,7 +319,55 @@ typedef struct NC_OUT_OF_BAND_CONNECTION_METADATA {
 
   // Used for Bluetooth connections.
   NC_DATA remote_bluetooth_mac_address;
+
+  //
+  // Properties for BLE out-of-band connections.
+  //
+
+  // The BLE peripheral native ID to use for the BLE connection.
+  NC_DATA ble_peripheral_native_id;
+
+  // The Protocol/Service Multiplexer(psm) value to use for the BLE connection.
+  int psm;
 } NC_OUT_OF_BAND_CONNECTION_METADATA, *PNC_OUT_OF_BAND_CONNECTION_METADATA;
+
+// Defines the minimal function interface for reading phenotype flags. Callbacks
+// will be implemented by the client.
+typedef struct NC_PHENOTYPE_FLAG_READER {
+  // Returns the value of the boolean flag with the given name. If not found,
+  // returns the default.
+  const bool (*get_bool_flag_value)(READER_CONTEXT context,
+                                    const NC_DATA* flag_name,
+                                    const bool default_value);
+  // Returns the value of the long flag with the given name. If not found,
+  // returns the default.
+  const int64_t (*get_long_flag_value)(READER_CONTEXT context,
+                                       const NC_DATA* flag_name,
+                                       const int64_t default_value);
+  // Returns the value of the double flag with the given name. If not found,
+  // returns the default.
+  const double (*get_double_flag_value)(READER_CONTEXT context,
+                                        const NC_DATA* flag_name,
+                                        const double default_value);
+  // Returns the value of the string flag with the given name. If not found,
+  // returns the default.
+  const NC_DATA (*get_string_flag_value)(READER_CONTEXT context,
+                                         const NC_DATA* flag_name,
+                                         const NC_DATA* default_value);
+  // Frees a string allocated when calling get_string_flag_value.
+  const void (*free_string_value)(const NC_DATA* value);
+} NC_PHENOTYPE_FLAG_READER;
+
+// Defines the minimal function interface for logging events. Callbacks
+// will be implemented by the client.
+// event_data - a serialized proto message of type
+// nearby.connections.ConnectionsLog.
+typedef void (*NcLogConnectionsEvent)(const NC_DATA* event_data);
+
+// Defines the struct for logging Nearby Connections events.
+typedef struct NC_EVENT_LOGGER {
+  NcLogConnectionsEvent log_connections_event;
+} NC_EVENT_LOGGER;
 
 #ifdef __cplusplus
 }  // extern "C"

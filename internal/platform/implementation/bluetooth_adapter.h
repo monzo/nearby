@@ -17,7 +17,9 @@
 
 #include <string>
 
+#include "absl/base/attributes.h"
 #include "absl/strings/string_view.h"
+#include "internal/platform/mac_address.h"
 
 namespace nearby {
 namespace api {
@@ -64,8 +66,7 @@ class BluetoothAdapter {
   virtual bool SetName(absl::string_view name) = 0;
   virtual bool SetName(absl::string_view name, bool persist) = 0;
 
-  // Returns BT MAC address assigned to this adapter.
-  virtual std::string GetMacAddress() const = 0;
+  virtual MacAddress GetMacAddress() const = 0;
 };
 
 }  // namespace api

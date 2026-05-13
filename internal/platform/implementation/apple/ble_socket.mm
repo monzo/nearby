@@ -14,13 +14,13 @@
 
 #import "internal/platform/implementation/apple/ble_socket.h"
 
-#include "internal/platform/implementation/ble_v2.h"
-
-#import "internal/platform/implementation/apple/Mediums/Ble/GNCMBleConnection.h"
+#import "internal/platform/implementation/apple/Flags/GNCFeatureFlags.h"
+#import "internal/platform/implementation/apple/Mediums/BLE/GNCMBleConnection.h"
 #import "internal/platform/implementation/apple/ble_peripheral.h"
 #import "internal/platform/implementation/apple/ble_utils.h"
 #import "internal/platform/implementation/apple/utils.h"
 
+#include "internal/platform/implementation/ble.h"
 // TODO(b/293336684): Remove this file when shared Weave is complete.
 
 namespace nearby {
@@ -55,46 +55,94 @@ BleInputStream::~BleInputStream() {
 }
 
 ExceptionOr<ByteArray> BleInputStream::Read(std::int64_t size) {
-  // Block until either (a) the connection has been closed, (b) we have enough data to return.
-  NSData *dataToReturn;
-  [condition_ lock];
-  while (true) {
-    // Check if the stream has been closed or severed.
-    if (!newDataPackets_) break;
+  if (GNCFeatureFlags.singleCopyEnabled) {
+    std::string dataToReturn;
+    bool success = false;
 
-    if (newDataPackets_.count > 0) {
-      // Add the packet data to the accumulated data.
-      for (NSData *data in newDataPackets_) {
-        if (data.length > 0) {
-          [accumulatedData_ appendData:data];
+    [condition_ lock];
+    while (true) {
+      // Check if the stream has been closed or severed.
+      if (!newDataPackets_) break;
+
+      if (newDataPackets_.count > 0) {
+        // Add the packet data to the accumulated data.
+        for (NSData *data in newDataPackets_) {
+          if (data.length > 0) {
+            [accumulatedData_ appendData:data];
+          }
         }
+        [newDataPackets_ removeAllObjects];
       }
-      [newDataPackets_ removeAllObjects];
+
+      if ((size == -1) && (accumulatedData_.length > 0)) {
+        // Return all of the data.
+        dataToReturn.assign((const char *)accumulatedData_.bytes, accumulatedData_.length);
+        accumulatedData_ = [NSMutableData data];
+        success = true;
+        break;
+      } else if (accumulatedData_.length > 0) {
+        // Return up to |size| bytes of the data.
+        std::int64_t sizeToReturn =
+            (accumulatedData_.length < size) ? accumulatedData_.length : size;
+        NSRange range = NSMakeRange(0, (NSUInteger)sizeToReturn);
+        // Copy bytes directly into std::string, avoiding [NSData subdataWithRange:]
+        dataToReturn.assign((const char *)accumulatedData_.bytes, sizeToReturn);
+        [accumulatedData_ replaceBytesInRange:range withBytes:nil length:0];
+        success = true;
+        break;
+      }
+
+      [condition_ wait];
     }
+    [condition_ unlock];
 
-    if ((size == -1) && (accumulatedData_.length > 0)) {
-      // Return all of the data.
-      dataToReturn = accumulatedData_;
-      accumulatedData_ = [NSMutableData data];
-      break;
-    } else if (accumulatedData_.length > 0) {
-      // Return up to |size| bytes of the data.
-      std::int64_t sizeToReturn = (accumulatedData_.length < size) ? accumulatedData_.length : size;
-      NSRange range = NSMakeRange(0, (NSUInteger)sizeToReturn);
-      dataToReturn = [accumulatedData_ subdataWithRange:range];
-      [accumulatedData_ replaceBytesInRange:range withBytes:nil length:0];
-      break;
+    if (success) {
+      // OPTIMIZATION: Zero-copy transfer from std::string to ByteArray
+      return ExceptionOr<ByteArray>{ByteArray(std::move(dataToReturn))};
+    } else {
+      return ExceptionOr<ByteArray>{Exception::kIo};
     }
-
-    [condition_ wait];
-  }
-  [condition_ unlock];
-
-  if (dataToReturn) {
-    NSLog(@"[NEARBY] Input stream: Received data of size: %lu", (unsigned long)dataToReturn.length);
-    return ExceptionOr<ByteArray>(ByteArrayFromNSData(dataToReturn));
   } else {
-    return ExceptionOr<ByteArray>{Exception::kIo};
+    // Legacy path
+    NSData *dataToReturn;
+    [condition_ lock];
+    while (true) {
+      // Check if the stream has been closed or severed.
+      if (!newDataPackets_) break;
+
+      if (newDataPackets_.count > 0) {
+        for (NSData *data in newDataPackets_) {
+          if (data.length > 0) {
+            [accumulatedData_ appendData:data];
+          }
+        }
+        [newDataPackets_ removeAllObjects];
+      }
+
+      if ((size == -1) && (accumulatedData_.length > 0)) {
+        // Return all of the data.
+        dataToReturn = accumulatedData_;
+        accumulatedData_ = [NSMutableData data];
+        break;
+      } else if (accumulatedData_.length > 0) {
+        // Return up to |size| bytes of the data.
+        std::int64_t sizeToReturn =
+            (accumulatedData_.length < size) ? accumulatedData_.length : size;
+        NSRange range = NSMakeRange(0, (NSUInteger)sizeToReturn);
+        dataToReturn = [accumulatedData_ subdataWithRange:range];
+        [accumulatedData_ replaceBytesInRange:range withBytes:nil length:0];
+        break;
+      }
+
+      [condition_ wait];
+    }
+    [condition_ unlock];
+
+    if (dataToReturn) {
+      return ExceptionOr<ByteArray>(ByteArrayFromNSData(dataToReturn));
+    } else {
+      return ExceptionOr<ByteArray>{Exception::kIo};
+    }
   }
 }
 
@@ -113,16 +161,24 @@ BleOutputStream::~BleOutputStream() {
   NSCAssert(!connection_, @"BleOutputStream not closed before destruction");
 }
 
-Exception BleOutputStream::Write(const ByteArray &data) {
+Exception BleOutputStream::Write(absl::string_view data) {
   [condition_ lock];
-  NSLog(@"[NEARBY] Sending data of size: %lu", NSDataFromByteArray(data).length);
-
   if (!connection_) {
     [condition_ unlock];
     return {Exception::kIo};
   }
 
-  NSMutableData *packet = [NSMutableData dataWithData:NSDataFromByteArray(data)];
+  NSData *packet;
+  if (GNCFeatureFlags.singleCopyEnabled) {
+    // OPTIMIZATION: Use DISPATCH_DATA_DESTRUCTOR_DEFAULT to perform a
+    // single copy into a GCD-managed buffer. No NSData required.
+    dispatch_data_t dispatchData =
+        dispatch_data_create(data.data(), data.size(), nil, DISPATCH_DATA_DESTRUCTOR_DEFAULT);
+    // dispatch_data_t is toll-free bridged to NSData
+    packet = (NSData *)dispatchData;
+  } else {
+    packet = [NSMutableData dataWithBytes:data.data() length:data.size()];
+  }
 
   // Send the data, blocking until the completion handler is called.
   __block bool isComplete = NO;
@@ -180,27 +236,32 @@ Exception BleOutputStream::Close() {
 BleSocket::BleSocket(id<GNCMConnection> connection)
     : input_stream_(new BleInputStream()),
       output_stream_(new BleOutputStream(connection)),
-      peripheral_(new EmptyBlePeripheral()) {}
+      peripheral_id_(BlePeripheral::DefaultBlePeripheral().GetUniqueId()) {}
 
-BleSocket::BleSocket(id<GNCMConnection> connection, api::ble_v2::BlePeripheral *peripheral)
+BleSocket::BleSocket(id<GNCMConnection> connection, api::ble::BlePeripheral::UniqueId peripheral_id)
     : input_stream_(new BleInputStream()),
       output_stream_(new BleOutputStream(connection)),
-      peripheral_(peripheral) {}
+      peripheral_id_(peripheral_id) {}
 
 BleSocket::~BleSocket() {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   DoClose();
 }
 
 bool BleSocket::IsClosed() const {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   return closed_;
 }
 
 Exception BleSocket::Close() {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   DoClose();
   return {Exception::kSuccess};
+}
+
+void BleSocket::SetCloseNotifier(absl::AnyInvocable<void()> notifier) {
+  absl::MutexLock lock(mutex_);
+  close_notifier_ = std::move(notifier);
 }
 
 void BleSocket::DoClose() {
@@ -208,6 +269,11 @@ void BleSocket::DoClose() {
     input_stream_->Close();
     output_stream_->Close();
     closed_ = true;
+
+    if (close_notifier_) {
+      close_notifier_();
+      close_notifier_ = nullptr;
+    }
   }
 }
 

@@ -1,3 +1,5 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
 licenses(["notice"])
 # Copyright 2020 Google LLC
 #
@@ -26,7 +28,6 @@ cc_library(
     ],
     deps = [
         "//internal/proto/analytics:connections_log_cc_proto",
-        "//internal/proto/analytics:fast_pair_log_cc_proto",
         "//sharing/proto/analytics:sharing_log_cc_proto",
     ],
 )

@@ -16,7 +16,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <filesystem>  // NOLINT
 #include <limits>
 #include <memory>
 #include <optional>
@@ -32,6 +31,7 @@
 #include "absl/time/time.h"
 #include "internal/analytics/mock_event_logger.h"
 #include "internal/analytics/sharing_log_matchers.h"
+#include "internal/base/file_path.h"
 #include "internal/test/fake_clock.h"
 #include "internal/test/fake_device_info.h"
 #include "internal/test/fake_task_runner.h"
@@ -43,9 +43,9 @@
 #include "sharing/internal/public/logging.h"
 #include "sharing/nearby_connection_impl.h"
 #include "sharing/nearby_connections_types.h"
-#include "sharing/paired_key_verification_runner.h"
 #include "sharing/proto/analytics/nearby_sharing_log.pb.h"
 #include "sharing/proto/wire_format.pb.h"
+#include "sharing/share_session_usage.h"
 #include "sharing/share_target.h"
 #include "sharing/text_attachment.h"
 #include "sharing/transfer_metadata.h"
@@ -59,7 +59,6 @@ namespace {
 using ::absl::Seconds;
 using ::location::nearby::proto::sharing::EventCategory;
 using ::location::nearby::proto::sharing::EventType;
-using ::location::nearby::proto::sharing::OSType;
 using ::location::nearby::proto::sharing::ResponseToIntroduction;
 using ::nearby::analytics::HasAction;
 using ::nearby::analytics::HasCategory;
@@ -88,9 +87,8 @@ using ::testing::UnorderedElementsAre;
 constexpr absl::string_view kEndpointId = "ABCD";
 
 std::unique_ptr<Payload> CreateFilePayload(int64_t payload_id,
-                                           std::filesystem::path file_path) {
-  auto file_payload =
-      std::make_unique<Payload>(InputFile(std::move(file_path)));
+                                           FilePath file_path) {
+  auto file_payload = std::make_unique<Payload>(file_path);
   file_payload->id = payload_id;
   return file_payload;
 }
@@ -218,7 +216,6 @@ TEST_F(IncomingShareSessionTest, ProcessIntroductionNoSupportedPayload) {
 TEST_F(IncomingShareSessionTest, ProcessIntroductionEmptyFile) {
   session_.OnConnected(&connection_);
   IntroductionFrame frame;
-  frame.mutable_file_metadata();
 
   EXPECT_THAT(session_.ProcessIntroduction(frame),
               Eq(TransferMetadata::Status::kUnsupportedAttachmentType));
@@ -243,7 +240,6 @@ TEST_F(IncomingShareSessionTest, ProcessIntroductionFilesTooLarge) {
 TEST_F(IncomingShareSessionTest, ProcessIntroductionEmptyText) {
   session_.OnConnected(&connection_);
   IntroductionFrame frame;
-  frame.mutable_text_metadata();
 
   EXPECT_THAT(session_.ProcessIntroduction(frame),
               Eq(TransferMetadata::Status::kUnsupportedAttachmentType));
@@ -300,24 +296,25 @@ TEST_F(IncomingShareSessionTest, ProcessIntroductionSuccess) {
 
 TEST_F(IncomingShareSessionTest, ProcessIntroductionWithApkSuccess) {
   IntroductionFrame introduction_frame;
-  CHECK(proto2::TextFormat::ParseFromString(R"pb(
-                                              app_metadata {
-                                                app_name: "MyApp"
-                                                size: 300
-                                                payload_id: 9876
-                                                payload_id: 9877
-                                                payload_id: 9878
-                                                id: 1234
-                                                file_name: "MyApp.apk"
-                                                file_name: "MyApp1.apk"
-                                                file_name: "MyApp2.apk"
-                                                file_size: 100
-                                                file_size: 100
-                                                file_size: 100
-                                                package_name: "com.example.myapp"
-                                              }
-                                            )pb",
-                                            &introduction_frame));
+  CHECK(
+      proto2::TextFormat::ParseFromString(R"pb(
+                                            app_metadata {
+                                              app_name: "MyApp"
+                                              size: 300
+                                              payload_id: 9876
+                                              payload_id: 9877
+                                              payload_id: 9878
+                                              id: 1234
+                                              file_name: "MyApp.apk"
+                                              file_name: "MyApp1.apk"
+                                              file_name: "MyApp2.apk"
+                                              file_size: 100
+                                              file_size: 100
+                                              file_size: 100
+                                              package_name: "com.example.myapp"
+                                            }
+                                          )pb",
+                                          &introduction_frame));
   service::proto::AppMetadata app_metadata = introduction_frame.app_metadata(0);
   int64_t payload_id1 = app_metadata.payload_id(0);
   int64_t payload_id2 = app_metadata.payload_id(1);
@@ -357,6 +354,51 @@ TEST_F(IncomingShareSessionTest, ProcessIntroductionWithApkSuccess) {
               UnorderedElementsAre(file1, file2, file3));
 }
 
+TEST_F(IncomingShareSessionTest, ProcessIntroductionWithApkLengthMismatch) {
+  IntroductionFrame introduction_frame;
+  CHECK(
+      proto2::TextFormat::ParseFromString(R"pb(
+                                            app_metadata {
+                                              app_name: "MyApp"
+                                              size: 300
+                                              payload_id: 9876
+                                              id: 1234
+                                              file_name: "MyApp.apk"
+                                              file_name: "MyApp2.apk"
+                                              file_size: 100
+                                              file_size: 100
+                                              file_size: 100
+                                              package_name: "com.example.myapp"
+                                            }
+                                          )pb",
+                                          &introduction_frame));
+  session_.OnConnected(&connection_);
+
+  EXPECT_THAT(session_.ProcessIntroduction(introduction_frame),
+              Eq(TransferMetadata::Status::kUnsupportedAttachmentType));
+}
+
+TEST_F(IncomingShareSessionTest, ProcessIntroductionWithApkInvalidSize) {
+  IntroductionFrame introduction_frame;
+  CHECK(
+      proto2::TextFormat::ParseFromString(R"pb(
+                                            app_metadata {
+                                              app_name: "MyApp"
+                                              size: 300
+                                              payload_id: 9876
+                                              id: 1234
+                                              file_name: "MyApp.apk"
+                                              file_size: 0
+                                              package_name: "com.example.myapp"
+                                            }
+                                          )pb",
+                                          &introduction_frame));
+  session_.OnConnected(&connection_);
+
+  EXPECT_THAT(session_.ProcessIntroduction(introduction_frame),
+              Eq(TransferMetadata::Status::kUnsupportedAttachmentType));
+}
+
 TEST_F(IncomingShareSessionTest,
        PayloadTransferUpdateCompleteWithWrongPayloadType) {
   connections_manager_.AcceptConnection(
@@ -367,7 +409,7 @@ TEST_F(IncomingShareSessionTest,
   // Set text payload for file attachment.
   connections_manager_.SetIncomingPayload(
       payload_id1_, CreateTextPayload(payload_id1_, "text1"));
-  std::filesystem::path file2_path = "/usr/tmp/file2";
+  FilePath file2_path{"/usr/tmp/file2"};
   connections_manager_.SetIncomingPayload(
       payload_id2_, CreateFilePayload(payload_id2_, file2_path));
   std::string text_content1 = "text1";
@@ -397,7 +439,8 @@ TEST_F(IncomingShareSessionTest,
                          HasEventType(EventType::RECEIVE_ATTACHMENTS_START),
                          Property(&SharingLog::receive_attachments_start,
                                   HasSessionId(1234)))))));
-  session_.ReadyForTransfer([]() {}, [](std::optional<V1Frame> frame) {});
+  session_.ReadyForTransfer(
+      []() {}, [](bool is_timeout, std::optional<V1Frame> frame) {});
   session_.AcceptTransfer([]() {});
 
   session_.PushPayloadTransferUpdateForTest(
@@ -467,7 +510,7 @@ TEST_F(IncomingShareSessionTest,
   session_.OnConnected(&connection_);
   EXPECT_THAT(session_.ProcessIntroduction(introduction_frame_),
               Eq(std::nullopt));
-  std::filesystem::path file1_path = "/usr/tmp/file1";
+  FilePath file1_path{"/usr/tmp/file1"};
   connections_manager_.SetIncomingPayload(
       payload_id1_, CreateFilePayload(payload_id1_, file1_path));
   // No payload for file2.
@@ -499,7 +542,8 @@ TEST_F(IncomingShareSessionTest,
                          HasEventType(EventType::RECEIVE_ATTACHMENTS_START),
                          Property(&SharingLog::receive_attachments_start,
                                   HasSessionId(1234)))))));
-  session_.ReadyForTransfer([]() {}, [](std::optional<V1Frame> frame) {});
+  session_.ReadyForTransfer(
+      []() {}, [](bool is_timeout, std::optional<V1Frame> frame) {});
   session_.AcceptTransfer([]() {});
 
   session_.PushPayloadTransferUpdateForTest(
@@ -569,10 +613,10 @@ TEST_F(IncomingShareSessionTest,
   session_.OnConnected(&connection_);
   EXPECT_THAT(session_.ProcessIntroduction(introduction_frame_),
               Eq(std::nullopt));
-  std::filesystem::path file1_path = "/usr/tmp/file1";
+  FilePath file1_path{"/usr/tmp/file1"};
   connections_manager_.SetIncomingPayload(
       payload_id1_, CreateFilePayload(payload_id1_, file1_path));
-  std::filesystem::path file2_path = "/usr/tmp/file2";
+  FilePath file2_path{"/usr/tmp/file2"};
   connections_manager_.SetIncomingPayload(
       payload_id2_, CreateFilePayload(payload_id2_, file2_path));
   std::string text_content1 = "text1";
@@ -600,7 +644,8 @@ TEST_F(IncomingShareSessionTest,
                          HasEventType(EventType::RECEIVE_ATTACHMENTS_START),
                          Property(&SharingLog::receive_attachments_start,
                                   HasSessionId(1234)))))));
-  session_.ReadyForTransfer([]() {}, [](std::optional<V1Frame> frame) {});
+  session_.ReadyForTransfer(
+      []() {}, [](bool is_timeout, std::optional<V1Frame> frame) {});
   session_.AcceptTransfer([]() {});
   session_.PushPayloadTransferUpdateForTest(
       std::make_unique<PayloadTransferUpdate>(
@@ -669,10 +714,10 @@ TEST_F(IncomingShareSessionTest,
   session_.OnConnected(&connection_);
   EXPECT_THAT(session_.ProcessIntroduction(introduction_frame_),
               Eq(std::nullopt));
-  std::filesystem::path file1_path = "/usr/tmp/file1";
+  FilePath file1_path{"/usr/tmp/file1"};
   connections_manager_.SetIncomingPayload(
       payload_id1_, CreateFilePayload(payload_id1_, file1_path));
-  std::filesystem::path file2_path = "/usr/tmp/file2";
+  FilePath file2_path{"/usr/tmp/file2"};
   connections_manager_.SetIncomingPayload(
       payload_id2_, CreateFilePayload(payload_id2_, file2_path));
   std::string text_content1 = "text1";
@@ -700,7 +745,8 @@ TEST_F(IncomingShareSessionTest,
                          HasEventType(EventType::RECEIVE_ATTACHMENTS_START),
                          Property(&SharingLog::receive_attachments_start,
                                   HasSessionId(1234)))))));
-  session_.ReadyForTransfer([]() {}, [](std::optional<V1Frame> frame) {});
+  session_.ReadyForTransfer(
+      []() {}, [](bool is_timeout, std::optional<V1Frame> frame) {});
   session_.AcceptTransfer([]() {});
 
   session_.PushPayloadTransferUpdateForTest(
@@ -778,12 +824,12 @@ TEST_F(IncomingShareSessionTest, GetPayloadFilePaths) {
   introduction_frame.mutable_file_metadata()->Add(std::move(file2));
   EXPECT_THAT(session_.ProcessIntroduction(introduction_frame),
               Eq(std::nullopt));
-  std::filesystem::path file1_path = "/usr/tmp/file1";
+  FilePath file1_path{"/usr/tmp/file1"};
   int64_t payload_id1 = introduction_frame.file_metadata(0).payload_id();
   connections_manager_.SetIncomingPayload(
       payload_id1, CreateFilePayload(payload_id1, file1_path));
 
-  std::filesystem::path file2_path = "/usr/tmp/file2";
+  FilePath file2_path{"/usr/tmp/file2"};
   int64_t payload_id2 = introduction_frame.file_metadata(1).payload_id();
   connections_manager_.SetIncomingPayload(
       payload_id2, CreateFilePayload(payload_id2, file2_path));
@@ -801,7 +847,8 @@ TEST_F(IncomingShareSessionTest, GetPayloadFilePaths) {
                          HasEventType(EventType::RECEIVE_ATTACHMENTS_START),
                          Property(&SharingLog::receive_attachments_start,
                                   HasSessionId(1234)))))));
-  session_.ReadyForTransfer([]() {}, [](std::optional<V1Frame> frame) {});
+  session_.ReadyForTransfer(
+      []() {}, [](bool is_timeout, std::optional<V1Frame> frame) {});
   session_.AcceptTransfer([]() {});
   session_.PushPayloadTransferUpdateForTest(
       std::make_unique<PayloadTransferUpdate>(
@@ -815,8 +862,7 @@ TEST_F(IncomingShareSessionTest, GetPayloadFilePaths) {
   EXPECT_THAT(metadata.has_value(), IsTrue());
   EXPECT_THAT(*metadata, HasStatus(TransferMetadata::Status::kComplete));
 
-  std::vector<std::filesystem::path> file_paths =
-      session_.GetPayloadFilePaths();
+  std::vector<FilePath> file_paths = session_.GetPayloadFilePaths();
 
   EXPECT_THAT(file_paths, UnorderedElementsAre(file1_path, file2_path));
 }
@@ -827,10 +873,10 @@ TEST_F(IncomingShareSessionTest, PayloadTransferUpdateCompleteWithSuccess) {
   session_.OnConnected(&connection_);
   EXPECT_THAT(session_.ProcessIntroduction(introduction_frame_),
               Eq(std::nullopt));
-  std::filesystem::path file1_path = "/usr/tmp/file1";
+  FilePath file1_path{"/usr/tmp/file1"};
   connections_manager_.SetIncomingPayload(
       payload_id1_, CreateFilePayload(payload_id1_, file1_path));
-  std::filesystem::path file2_path = "/usr/tmp/file2";
+  FilePath file2_path{"/usr/tmp/file2"};
   connections_manager_.SetIncomingPayload(
       payload_id2_, CreateFilePayload(payload_id2_, file2_path));
   std::string text_content1 = "text1";
@@ -859,7 +905,8 @@ TEST_F(IncomingShareSessionTest, PayloadTransferUpdateCompleteWithSuccess) {
                          HasEventType(EventType::RECEIVE_ATTACHMENTS_START),
                          Property(&SharingLog::receive_attachments_start,
                                   HasSessionId(1234)))))));
-  session_.ReadyForTransfer([]() {}, [](std::optional<V1Frame> frame) {});
+  session_.ReadyForTransfer(
+      []() {}, [](bool is_timeout, std::optional<V1Frame> frame) {});
   session_.AcceptTransfer([]() {});
   session_.PushPayloadTransferUpdateForTest(
       std::make_unique<PayloadTransferUpdate>(
@@ -925,10 +972,10 @@ TEST_F(IncomingShareSessionTest, PayloadTransferUpdateCancelled) {
   session_.OnConnected(&connection_);
   EXPECT_THAT(session_.ProcessIntroduction(introduction_frame_),
               Eq(std::nullopt));
-  std::filesystem::path file1_path = "/usr/tmp/file1";
+  FilePath file1_path{"/usr/tmp/file1"};
   connections_manager_.SetIncomingPayload(
       payload_id1_, CreateFilePayload(payload_id1_, file1_path));
-  std::filesystem::path file2_path = "/usr/tmp/file2";
+  FilePath file2_path{"/usr/tmp/file2"};
   connections_manager_.SetIncomingPayload(
       payload_id2_, CreateFilePayload(payload_id2_, file2_path));
   std::string text_content1 = "text1";
@@ -957,7 +1004,8 @@ TEST_F(IncomingShareSessionTest, PayloadTransferUpdateCancelled) {
                          HasEventType(EventType::RECEIVE_ATTACHMENTS_START),
                          Property(&SharingLog::receive_attachments_start,
                                   HasSessionId(1234)))))));
-  session_.ReadyForTransfer([]() {}, [](std::optional<V1Frame> frame) {});
+  session_.ReadyForTransfer(
+      []() {}, [](bool is_timeout, std::optional<V1Frame> frame) {});
   session_.AcceptTransfer([]() {});
   session_.PushPayloadTransferUpdateForTest(
       std::make_unique<PayloadTransferUpdate>(
@@ -983,10 +1031,10 @@ TEST_F(IncomingShareSessionTest, PayloadTransferUpdateFailed) {
   session_.OnConnected(&connection_);
   EXPECT_THAT(session_.ProcessIntroduction(introduction_frame_),
               Eq(std::nullopt));
-  std::filesystem::path file1_path = "/usr/tmp/file1";
+  FilePath file1_path{"/usr/tmp/file1"};
   connections_manager_.SetIncomingPayload(
       payload_id1_, CreateFilePayload(payload_id1_, file1_path));
-  std::filesystem::path file2_path = "/usr/tmp/file2";
+  FilePath file2_path{"/usr/tmp/file2"};
   connections_manager_.SetIncomingPayload(
       payload_id2_, CreateFilePayload(payload_id2_, file2_path));
   std::string text_content1 = "text1";
@@ -1001,7 +1049,8 @@ TEST_F(IncomingShareSessionTest, PayloadTransferUpdateFailed) {
   connections_manager_.SetIncomingPayload(
       wifi_payload_id2_,
       CreateWifiCredentialsPayload(wifi_payload_id2_, "password2", true));
-  session_.ReadyForTransfer([]() {}, [](std::optional<V1Frame> frame) {});
+  session_.ReadyForTransfer(
+      []() {}, [](bool is_timeout, std::optional<V1Frame> frame) {});
   session_.AcceptTransfer([]() {});
   session_.PushPayloadTransferUpdateForTest(
       std::make_unique<PayloadTransferUpdate>(
@@ -1020,10 +1069,10 @@ TEST_F(IncomingShareSessionTest, PayloadTransferUpdateInProgress) {
   session_.OnConnected(&connection_);
   EXPECT_THAT(session_.ProcessIntroduction(introduction_frame_),
               Eq(std::nullopt));
-  std::filesystem::path file1_path = "/usr/tmp/file1";
+  FilePath file1_path{"/usr/tmp/file1"};
   connections_manager_.SetIncomingPayload(
       payload_id1_, CreateFilePayload(payload_id1_, file1_path));
-  std::filesystem::path file2_path = "/usr/tmp/file2";
+  FilePath file2_path{"/usr/tmp/file2"};
   connections_manager_.SetIncomingPayload(
       payload_id2_, CreateFilePayload(payload_id2_, file2_path));
   std::string text_content1 = "text1";
@@ -1052,7 +1101,8 @@ TEST_F(IncomingShareSessionTest, PayloadTransferUpdateInProgress) {
                          HasEventType(EventType::RECEIVE_ATTACHMENTS_START),
                          Property(&SharingLog::receive_attachments_start,
                                   HasSessionId(1234)))))));
-  session_.ReadyForTransfer([]() {}, [](std::optional<V1Frame> frame) {});
+  session_.ReadyForTransfer(
+      []() {}, [](bool is_timeout, std::optional<V1Frame> frame) {});
   session_.AcceptTransfer([]() {});
   session_.PushPayloadTransferUpdateForTest(
       std::make_unique<PayloadTransferUpdate>(
@@ -1070,7 +1120,8 @@ TEST_F(IncomingShareSessionTest, PayloadTransferUpdateInProgress) {
 
 TEST_F(IncomingShareSessionTest, ReadyForTransferNotConnected) {
   EXPECT_THAT(
-      session_.ReadyForTransfer([]() {}, [](std::optional<V1Frame> frame) {}),
+      session_.ReadyForTransfer(
+          []() {}, [](bool is_timeout, std::optional<V1Frame> frame) {}),
       IsFalse());
 }
 
@@ -1078,10 +1129,13 @@ TEST_F(IncomingShareSessionTest, ReadyForTransferNotSelfShare) {
   session_.OnConnected(&connection_);
   EXPECT_CALL(
       transfer_metadata_callback_,
-      Call(_, HasStatus(TransferMetadata::Status::kAwaitingLocalConfirmation)));
+      Call(_, AllOf(HasStatus(
+                        TransferMetadata::Status::kAwaitingLocalConfirmation),
+                    HasUsage(ShareSessionUsage::kSharing))));
 
   EXPECT_THAT(
-      session_.ReadyForTransfer([]() {}, [](std::optional<V1Frame> frame) {}),
+      session_.ReadyForTransfer(
+          []() {}, [](bool is_timeout, std::optional<V1Frame> frame) {}),
       IsFalse());
 }
 
@@ -1096,11 +1150,14 @@ TEST_F(IncomingShareSessionTest, ReadyForTransferSelfShare) {
   session.OnConnected(&connection_);
   EXPECT_CALL(
       transfer_metadata_callback_,
-      Call(_, HasStatus(TransferMetadata::Status::kAwaitingLocalConfirmation)))
+      Call(_, AllOf(HasStatus(
+                        TransferMetadata::Status::kAwaitingLocalConfirmation),
+                    HasUsage(ShareSessionUsage::kSharing))))
       .Times(0);
 
   EXPECT_THAT(
-      session.ReadyForTransfer([]() {}, [](std::optional<V1Frame> frame) {}),
+      session.ReadyForTransfer(
+          []() {}, [](bool is_timeout, std::optional<V1Frame> frame) {}),
       IsTrue());
 }
 
@@ -1108,12 +1165,14 @@ TEST_F(IncomingShareSessionTest, ReadyForTransferTimeout) {
   session_.OnConnected(&connection_);
   EXPECT_CALL(
       transfer_metadata_callback_,
-      Call(_, HasStatus(TransferMetadata::Status::kAwaitingLocalConfirmation)));
+      Call(_, AllOf(HasStatus(
+                        TransferMetadata::Status::kAwaitingLocalConfirmation),
+                    HasUsage(ShareSessionUsage::kSharing))));
   bool accept_timeout_called = false;
 
   EXPECT_THAT(session_.ReadyForTransfer(
                   [&accept_timeout_called]() { accept_timeout_called = true; },
-                  [](std::optional<V1Frame> frame) {}),
+                  [](bool is_timeout, std::optional<V1Frame> frame) {}),
               IsFalse());
   clock_.FastForward(absl::Seconds(60));
   task_runner_.SyncWithTimeout(absl::Milliseconds(100));
@@ -1125,7 +1184,7 @@ TEST_F(IncomingShareSessionTest, ReadyForTransferTimeoutCancelled) {
   session_.OnConnected(&connection_);
   EXPECT_THAT(session_.ProcessIntroduction(introduction_frame_),
               Eq(std::nullopt));
-  std::filesystem::path file1_path = "/usr/tmp/file1";
+  FilePath file1_path{"/usr/tmp/file1"};
   connections_manager_.SetIncomingPayload(
       payload_id1_, CreateFilePayload(payload_id1_, file1_path));
   EXPECT_CALL(
@@ -1146,7 +1205,7 @@ TEST_F(IncomingShareSessionTest, ReadyForTransferTimeoutCancelled) {
   bool accept_timeout_called = false;
   EXPECT_THAT(session_.ReadyForTransfer(
                   [&accept_timeout_called]() { accept_timeout_called = true; },
-                  [](std::optional<V1Frame> frame) {}),
+                  [](bool is_timeout, std::optional<V1Frame> frame) {}),
               IsFalse());
   session_.AcceptTransfer([]() {});
   session_.PushPayloadTransferUpdateForTest(
@@ -1181,11 +1240,14 @@ TEST_F(IncomingShareSessionTest, AcceptTransferSuccess) {
   EXPECT_THAT(session_.ProcessIntroduction(introduction_frame_),
               Eq(std::nullopt));
   EXPECT_THAT(
-      session_.ReadyForTransfer([]() {}, [](std::optional<V1Frame> frame) {}),
+      session_.ReadyForTransfer(
+          []() {}, [](bool is_timeout, std::optional<V1Frame> frame) {}),
       IsFalse());
   EXPECT_CALL(
       transfer_metadata_callback_,
-      Call(_, HasStatus(TransferMetadata::Status::kAwaitingRemoteAcceptance)));
+      Call(_,
+           AllOf(HasStatus(TransferMetadata::Status::kAwaitingRemoteAcceptance),
+                 HasUsage(ShareSessionUsage::kSharing))));
   EXPECT_CALL(
       mock_event_logger_,
       Log(Matcher<const SharingLog&>(AllOf(
@@ -1223,139 +1285,6 @@ TEST_F(IncomingShareSessionTest, AcceptTransferSuccess) {
   ASSERT_EQ(frame.v1().type(), V1Frame::RESPONSE);
   EXPECT_EQ(frame.v1().connection_response().status(),
             ConnectionResponseFrame::ACCEPT);
-}
-
-TEST_F(IncomingShareSessionTest, ProcessKeyVerificationResultSuccess) {
-  session_.OnConnected(&connection_);
-  session_.SetTokenForTests("1234");
-
-  bool introduction_received = false;
-  EXPECT_THAT(
-      session_.ProcessKeyVerificationResult(
-          PairedKeyVerificationRunner::PairedKeyVerificationResult::kSuccess,
-          OSType::WINDOWS,
-          [&introduction_received](std::optional<IntroductionFrame>) {
-            introduction_received = true;
-          }),
-      IsTrue());
-
-  EXPECT_THAT(session_.self_share(), IsFalse());
-  EXPECT_THAT(session_.token(), IsEmpty());
-  EXPECT_THAT(session_.os_type(), Eq(OSType::WINDOWS));
-  EXPECT_THAT(introduction_received, IsFalse());
-
-  // Send Introduction frame
-  nearby::sharing::service::proto::Frame frame =
-      nearby::sharing::service::proto::Frame();
-  frame.set_version(nearby::sharing::service::proto::Frame::V1);
-  V1Frame* v1frame = frame.mutable_v1();
-  v1frame->set_type(service::proto::V1Frame::INTRODUCTION);
-  v1frame->mutable_introduction();
-  std::vector<uint8_t> data;
-  data.resize(frame.ByteSizeLong());
-  EXPECT_THAT(frame.SerializeToArray(data.data(), data.size()), IsTrue());
-  connection_.WriteMessage(std::move(data));
-
-  EXPECT_THAT(introduction_received, IsTrue());
-}
-
-TEST_F(IncomingShareSessionTest, ProcessKeyVerificationResultFail) {
-  session_.OnConnected(&connection_);
-  session_.SetTokenForTests("1234");
-
-  bool introduction_received = false;
-  EXPECT_THAT(
-      session_.ProcessKeyVerificationResult(
-          PairedKeyVerificationRunner::PairedKeyVerificationResult::kFail,
-          OSType::WINDOWS,
-          [&introduction_received](std::optional<IntroductionFrame>) {
-            introduction_received = true;
-          }),
-      IsFalse());
-
-  EXPECT_THAT(session_.token(), Eq("1234"));
-  EXPECT_THAT(session_.os_type(), Eq(OSType::WINDOWS));
-  EXPECT_THAT(introduction_received, IsFalse());
-
-  // Send Introduction frame
-  nearby::sharing::service::proto::Frame frame =
-      nearby::sharing::service::proto::Frame();
-  frame.set_version(nearby::sharing::service::proto::Frame::V1);
-  V1Frame* v1frame = frame.mutable_v1();
-  v1frame->set_type(service::proto::V1Frame::INTRODUCTION);
-  v1frame->mutable_introduction();
-  std::vector<uint8_t> data;
-  data.resize(frame.ByteSizeLong());
-  EXPECT_THAT(frame.SerializeToArray(data.data(), data.size()), IsTrue());
-  connection_.WriteMessage(std::move(data));
-
-  EXPECT_THAT(introduction_received, IsFalse());
-}
-
-TEST_F(IncomingShareSessionTest, ProcessKeyVerificationResultUnable) {
-  session_.OnConnected(&connection_);
-  session_.SetTokenForTests("1234");
-
-  bool introduction_received = false;
-  EXPECT_THAT(
-      session_.ProcessKeyVerificationResult(
-          PairedKeyVerificationRunner::PairedKeyVerificationResult::kUnable,
-          OSType::WINDOWS,
-          [&introduction_received](std::optional<IntroductionFrame>) {
-            introduction_received = true;
-          }),
-      IsTrue());
-
-  EXPECT_THAT(session_.token(), Eq("1234"));
-  EXPECT_THAT(session_.os_type(), Eq(OSType::WINDOWS));
-  EXPECT_THAT(introduction_received, IsFalse());
-
-  // Send Introduction frame
-  nearby::sharing::service::proto::Frame frame =
-      nearby::sharing::service::proto::Frame();
-  frame.set_version(nearby::sharing::service::proto::Frame::V1);
-  V1Frame* v1frame = frame.mutable_v1();
-  v1frame->set_type(service::proto::V1Frame::INTRODUCTION);
-  v1frame->mutable_introduction();
-  std::vector<uint8_t> data;
-  data.resize(frame.ByteSizeLong());
-  EXPECT_THAT(frame.SerializeToArray(data.data(), data.size()), IsTrue());
-  connection_.WriteMessage(std::move(data));
-
-  EXPECT_THAT(introduction_received, IsTrue());
-}
-
-TEST_F(IncomingShareSessionTest, ProcessKeyVerificationResultUnknown) {
-  session_.OnConnected(&connection_);
-  session_.SetTokenForTests("1234");
-
-  bool introduction_received = false;
-  EXPECT_THAT(
-      session_.ProcessKeyVerificationResult(
-          PairedKeyVerificationRunner::PairedKeyVerificationResult::kUnknown,
-          OSType::WINDOWS,
-          [&introduction_received](std::optional<IntroductionFrame>) {
-            introduction_received = true;
-          }),
-      IsFalse());
-
-  EXPECT_THAT(session_.token(), Eq("1234"));
-  EXPECT_THAT(session_.os_type(), Eq(OSType::WINDOWS));
-  EXPECT_THAT(introduction_received, IsFalse());
-
-  // Send Introduction frame
-  nearby::sharing::service::proto::Frame frame =
-      nearby::sharing::service::proto::Frame();
-  frame.set_version(nearby::sharing::service::proto::Frame::V1);
-  V1Frame* v1frame = frame.mutable_v1();
-  v1frame->set_type(service::proto::V1Frame::INTRODUCTION);
-  v1frame->mutable_introduction();
-  std::vector<uint8_t> data;
-  data.resize(frame.ByteSizeLong());
-  EXPECT_THAT(frame.SerializeToArray(data.data(), data.size()), IsTrue());
-  connection_.WriteMessage(std::move(data));
-
-  EXPECT_THAT(introduction_received, IsFalse());
 }
 
 TEST_F(IncomingShareSessionTest, TryUpgradeBandwidthNotNeeded) {
@@ -1397,8 +1326,10 @@ TEST_F(IncomingShareSessionTest, TryUpgradeBandwidthNeeded) {
 }
 
 TEST_F(IncomingShareSessionTest, SendFailureResponseNotConnected) {
-  EXPECT_CALL(transfer_metadata_callback_,
-              Call(_, HasStatus(TransferMetadata::Status::kNotEnoughSpace)));
+  EXPECT_CALL(
+      transfer_metadata_callback_,
+      Call(_, AllOf(HasStatus(TransferMetadata::Status::kNotEnoughSpace),
+                    HasUsage(ShareSessionUsage::kSharing))));
 
   session_.SendFailureResponse(TransferMetadata::Status::kNotEnoughSpace);
 }
@@ -1407,8 +1338,10 @@ TEST_F(IncomingShareSessionTest, SendFailureResponseConnected) {
   connections_manager_.AcceptConnection(
       /*endpoint_info=*/{}, kEndpointId, &connection_);
   session_.OnConnected(&connection_);
-  EXPECT_CALL(transfer_metadata_callback_,
-              Call(_, HasStatus(TransferMetadata::Status::kNotEnoughSpace)));
+  EXPECT_CALL(
+      transfer_metadata_callback_,
+      Call(_, AllOf(HasStatus(TransferMetadata::Status::kNotEnoughSpace),
+                    HasUsage(ShareSessionUsage::kSharing))));
   std::queue<std::vector<uint8_t>> frames_data;
   connections_manager_.set_send_payload_callback(
       [&](std::unique_ptr<Payload> payload,

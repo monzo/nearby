@@ -20,32 +20,35 @@
 #include <string>
 
 #include "absl/strings/string_view.h"
+#include "proto/sharing_enums.pb.h"
 #include "sharing/attachment.h"
 #include "sharing/common/nearby_share_enums.h"
 #include "sharing/proto/wire_format.pb.h"
 
-namespace nearby {
-namespace sharing {
+namespace nearby::sharing {
 
 // Represents a text attachment.
 class TextAttachment : public Attachment {
  public:
   using Type = nearby::sharing::service::proto::TextMetadata::Type;
 
-  TextAttachment(Type type, std::string text_body,
-                 std::optional<std::string> text_title,
-                 std::optional<std::string> mime_type, int32_t batch_id = 0,
-                 SourceType source_type = SourceType::kUnknown);
-  TextAttachment(int64_t id, Type type, std::string text_title, int64_t size,
-                 int32_t batch_id = 0,
-                 SourceType source_type = SourceType::kUnknown);
-  TextAttachment(int64_t id, Type type, std::string text_body,
-                 std::string text_title, int64_t size, std::string mime_type,
-                 int32_t batch_id, SourceType source_type);
+  TextAttachment(
+      Type type, std::string text_body, std::optional<std::string> text_title,
+      std::optional<std::string> mime_type, int32_t batch_id = 0,
+      location::nearby::proto::sharing::AttachmentSourceType source_type =
+          location::nearby::proto::sharing::ATTACHMENT_SOURCE_UNKNOWN);
+  TextAttachment(
+      int64_t id, Type type, std::string text_title, int64_t size,
+      int32_t batch_id = 0,
+      location::nearby::proto::sharing::AttachmentSourceType source_type =
+          location::nearby::proto::sharing::ATTACHMENT_SOURCE_UNKNOWN);
+  TextAttachment(
+      int64_t id, Type type, std::string text_body, std::string text_title,
+      int64_t size, std::string mime_type, int32_t batch_id,
+      location::nearby::proto::sharing::AttachmentSourceType source_type);
   TextAttachment(const TextAttachment&) = default;
   TextAttachment(TextAttachment&&) = default;
-  TextAttachment& operator=(const TextAttachment&) = default;
-  TextAttachment& operator=(TextAttachment&&) = default;
+  TextAttachment& operator=(TextAttachment&&) = delete;
   ~TextAttachment() override = default;
 
   absl::string_view text_body() const { return text_body_; }
@@ -61,13 +64,12 @@ class TextAttachment : public Attachment {
   std::string mime_type() const { return mime_type_; }
 
  private:
-  Type type_ = service::proto::TextMetadata::UNKNOWN;
+  const Type type_;
   std::string text_title_;
+  const std::string mime_type_;
   std::string text_body_;
-  std::string mime_type_;
 };
 
-}  // namespace sharing
-}  // namespace nearby
+}  // namespace nearby::sharing
 
 #endif  // THIRD_PARTY_NEARBY_SHARING_TEXT_ATTACHMENT_H_

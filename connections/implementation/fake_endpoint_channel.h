@@ -19,11 +19,13 @@
 #include <memory>
 #include <string>
 
+#include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "connections/implementation/analytics/analytics_recorder.h"
 #include "connections/implementation/endpoint_channel.h"
 #include "internal/platform/byte_array.h"
 #include "internal/platform/exception.h"
+#include "internal/platform/implementation/system_clock.h"
 
 namespace nearby {
 namespace connections {
@@ -44,16 +46,7 @@ class FakeEndpointChannel : public EndpointChannel {
     read_timestamp_ = SystemClock::ElapsedRealtime();
     return read_output_;
   }
-  ExceptionOr<ByteArray> Read(PacketMetaData& packet_meta_data) override {
-    read_timestamp_ = SystemClock::ElapsedRealtime();
-    return read_output_;
-  }
-  Exception Write(const ByteArray& data) override {
-    write_timestamp_ = SystemClock::ElapsedRealtime();
-    return write_output_;
-  }
-  Exception Write(const ByteArray& data,
-                  PacketMetaData& packet_meta_data) override {
+  Exception Write(absl::string_view data) override {
     write_timestamp_ = SystemClock::ElapsedRealtime();
     return write_output_;
   }

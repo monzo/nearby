@@ -28,6 +28,7 @@
 #include "connections/implementation/endpoint_channel.h"
 #include "connections/implementation/endpoint_channel_manager.h"
 #include "connections/implementation/endpoint_manager.h"
+#include "connections/implementation/mediums/ble.h"
 #include "connections/implementation/mediums/mediums.h"
 #include "connections/medium_selector.h"
 #include "internal/platform/cancelable_alarm.h"
@@ -65,8 +66,6 @@ namespace connections {
 //     other, and upon doing so, close the prior EndpointChannel.
 class BwuManager : public EndpointManager::FrameProcessor {
  public:
-  using UpgradePathInfo = BwuHandler::UpgradePathInfo;
-
   struct Config {
     BooleanMediumSelector allow_upgrade_to;
     absl::Duration bandwidth_upgrade_retry_delay;
@@ -93,8 +92,7 @@ class BwuManager : public EndpointManager::FrameProcessor {
   // @EndpointManagerReaderThread
   void OnIncomingFrame(location::nearby::connections::OfflineFrame& frame,
                        const std::string& endpoint_id, ClientProxy* client,
-                       Medium medium,
-                       PacketMetaData& packet_meta_data) override;
+                       Medium medium) override;
 
   // Cleans up in-progress upgrades after endpoint disconnection.
   // @EndpointManagerReaderThread
@@ -138,13 +136,16 @@ class BwuManager : public EndpointManager::FrameProcessor {
                                  const std::vector<Medium>& mediums) const;
 
   // BaseBwuHandler
-  using ClientIntroduction = BwuNegotiationFrame::ClientIntroduction;
 
-  // Processes the BwuNegotiationFrames that come over the EndpointChannel on
-  // both initiator and responder side of the upgrade.
-  void OnBwuNegotiationFrame(ClientProxy* client,
-                             const BwuNegotiationFrame frame,
-                             const string& endpoint_id);
+  // Processes the
+  // location::nearby::connections::BandwidthUpgradeNegotiationFrames that come
+  // over the EndpointChannel on both initiator and responder side of the
+  // upgrade.
+  void OnBwuNegotiationFrame(
+      ClientProxy* client,
+      const location::nearby::connections::BandwidthUpgradeNegotiationFrame&
+          frame,
+      const string& endpoint_id);
 
   // Called to revert any state changed in the course of setting up the upgraded
   // medium for an endpoint.
@@ -169,22 +170,27 @@ class BwuManager : public EndpointManager::FrameProcessor {
   void RunUpgradeProtocol(ClientProxy* client, const std::string& endpoint_id,
                           std::unique_ptr<EndpointChannel> new_channel,
                           bool enable_encryption);
-  void RunUpgradeFailedProtocol(ClientProxy* client,
-                                const std::string& endpoint_id,
-                                const UpgradePathInfo& upgrade_path_info);
-  void ProcessBwuPathAvailableEvent(ClientProxy* client,
-                                    const std::string& endpoint_id,
-                                    const UpgradePathInfo& upgrade_path_info);
+  void RunUpgradeFailedProtocol(
+      ClientProxy* client, const std::string& endpoint_id,
+      const location::nearby::connections::BandwidthUpgradeNegotiationFrame::
+          UpgradePathInfo& upgrade_path_info);
+  void ProcessBwuPathAvailableEvent(
+      ClientProxy* client, const std::string& endpoint_id,
+      const location::nearby::connections::BandwidthUpgradeNegotiationFrame::
+          UpgradePathInfo& upgrade_path_info);
   ErrorOr<std::unique_ptr<EndpointChannel>>
   ProcessBwuPathAvailableEventInternal(
       ClientProxy* client, const std::string& endpoint_id,
-      const UpgradePathInfo& upgrade_path_info);
+      const location::nearby::connections::BandwidthUpgradeNegotiationFrame::
+          UpgradePathInfo& upgrade_path_info);
   void ProcessLastWriteToPriorChannelEvent(ClientProxy* client,
                                            const std::string& endpoint_id);
   void ProcessSafeToClosePriorChannelEvent(ClientProxy* client,
                                            const std::string& endpoint_id);
-  bool ReadClientIntroductionFrame(EndpointChannel* endpoint_channel,
-                                   ClientIntroduction& introduction);
+  bool ReadClientIntroductionFrame(
+      EndpointChannel* endpoint_channel,
+      location::nearby::connections::BandwidthUpgradeNegotiationFrame::
+          ClientIntroduction& introduction);
   bool ReadClientIntroductionAckFrame(EndpointChannel* endpoint_channel);
   bool WriteClientIntroductionAckFrame(EndpointChannel* endpoint_channel);
   void ProcessEndpointDisconnection(ClientProxy* client,
@@ -192,7 +198,8 @@ class BwuManager : public EndpointManager::FrameProcessor {
                                     CountDownLatch* barrier);
   void ProcessUpgradeFailureEvent(
       ClientProxy* client, const std::string& endpoint_id,
-      const UpgradePathInfo& upgrade_info,
+      const location::nearby::connections::BandwidthUpgradeNegotiationFrame::
+          UpgradePathInfo& upgrade_info,
       location::nearby::proto::connections::BandwidthUpgradeResult result,
       bool record_analytic,
       location::nearby::proto::connections::OperationResultCode
@@ -212,6 +219,13 @@ class BwuManager : public EndpointManager::FrameProcessor {
       location::nearby::proto::connections::OperationResultCode
           operation_result_code);
 
+  bool NeedToSwitchRole(
+      ClientProxy* client, const std::string& endpoint_id, Medium medium,
+      const location::nearby::connections::MediumRole& medium_role);
+
+  virtual const location::nearby::connections::OsInfo& GetLocalOsInfo(
+      ClientProxy* client) const;
+
   bool is_single_threaded_for_testing_ = false;
 
   Config config_;
@@ -226,6 +240,7 @@ class BwuManager : public EndpointManager::FrameProcessor {
 
   Mediums* mediums_;
   absl::flat_hash_map<Medium, std::unique_ptr<BwuHandler>> handlers_;
+  Ble& ble_medium_{mediums_->GetBle()};
 
   EndpointManager* endpoint_manager_;
   EndpointChannelManager* channel_manager_;
@@ -251,6 +266,11 @@ class BwuManager : public EndpointManager::FrameProcessor {
   // retry happen, then we can not find the last delay used in the alarm. Thus
   // using a different map to keep track of the delays per endpoint.
   absl::flat_hash_map<std::string, absl::Duration> retry_delays_;
+
+  // Whether the dynamic role switch feature is enabled.
+  bool is_dynamic_role_switch_enabled_ = NearbyFlags::GetInstance().GetBoolFlag(
+      config_package_nearby::nearby_connections_feature::
+          kEnableDynamicRoleSwitch);
 };
 
 }  // namespace connections

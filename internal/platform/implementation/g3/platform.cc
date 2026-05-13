@@ -16,7 +16,7 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <filesystem>  // NOLINT
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -25,17 +25,20 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "internal/base/file_path.h"
 #include "internal/base/files.h"
+#include "internal/platform/implementation/app_lifecycle_monitor.h"
 #include "internal/platform/implementation/atomic_boolean.h"
 #include "internal/platform/implementation/atomic_reference.h"
+#include "internal/platform/implementation/awdl.h"
 #include "internal/platform/implementation/ble.h"
-#include "internal/platform/implementation/ble_v2.h"
 #include "internal/platform/implementation/bluetooth_adapter.h"
 #include "internal/platform/implementation/bluetooth_classic.h"
 #include "internal/platform/implementation/condition_variable.h"
 #include "internal/platform/implementation/count_down_latch.h"
 #include "internal/platform/implementation/credential_storage.h"
 #include "internal/platform/implementation/device_info.h"
+#include "internal/platform/implementation/g3/awdl.h"
 #include "internal/platform/implementation/http_loader.h"
 #include "internal/platform/implementation/input_file.h"
 #include "internal/platform/implementation/log_message.h"
@@ -43,7 +46,6 @@
 #include "internal/platform/implementation/output_file.h"
 #include "internal/platform/implementation/preferences_manager.h"
 #include "internal/platform/implementation/scheduled_executor.h"
-#include "internal/platform/implementation/server_sync.h"
 #include "internal/platform/implementation/shared/count_down_latch.h"
 #include "internal/platform/implementation/submittable_executor.h"
 #include "internal/platform/implementation/timer.h"
@@ -61,7 +63,6 @@
 #include "internal/platform/implementation/g3/atomic_boolean.h"
 #include "internal/platform/implementation/g3/atomic_reference.h"
 #include "internal/platform/implementation/g3/ble.h"
-#include "internal/platform/implementation/g3/ble_v2.h"
 #include "internal/platform/implementation/g3/bluetooth_adapter.h"
 #include "internal/platform/implementation/g3/bluetooth_classic.h"
 #include "internal/platform/implementation/g3/condition_variable.h"
@@ -138,16 +139,16 @@ std::unique_ptr<AtomicBoolean> ImplementationPlatform::CreateAtomicBoolean(
 
 ABSL_DEPRECATED("This interface will be deleted in the near future.")
 std::unique_ptr<InputFile> ImplementationPlatform::CreateInputFile(
-    PayloadId payload_id, std::int64_t total_size) {
+    PayloadId payload_id) {
   std::string parent_folder("");
   std::string file_name(std::to_string(payload_id));
   return shared::IOFile::CreateInputFile(
-      GetDownloadPath(parent_folder, file_name), total_size);
+      GetDownloadPath(parent_folder, file_name));
 }
 
 std::unique_ptr<InputFile> ImplementationPlatform::CreateInputFile(
-    const std::string& file_path, size_t size) {
-  return shared::IOFile::CreateInputFile(file_path, size);
+    const std::string& file_path) {
+  return shared::IOFile::CreateInputFile(file_path);
 }
 
 ABSL_DEPRECATED("This interface will be deleted in the near future.")
@@ -162,12 +163,12 @@ std::unique_ptr<OutputFile> ImplementationPlatform::CreateOutputFile(
 
 std::unique_ptr<OutputFile> ImplementationPlatform::CreateOutputFile(
     const std::string& file_path) {
-  std::filesystem::path path = std::filesystem::u8path(file_path);
-  std::filesystem::path folder_path = path.parent_path();
+  FilePath path(file_path);
+  FilePath folder_path = path.GetParentPath();
   // Verifies that a path is a valid directory.
-  if (!sharing::DirectoryExists(folder_path)) {
-    if (!sharing::CreateDirectories(folder_path)) {
-      LOG(ERROR) << "Failed to create directory: " << folder_path.string();
+  if (!Files::DirectoryExists(folder_path)) {
+    if (!Files::CreateDirectories(folder_path)) {
+      LOG(ERROR) << "Failed to create directory: " << folder_path.ToString();
       return nullptr;
     }
   }
@@ -185,24 +186,15 @@ ImplementationPlatform::CreateBluetoothClassicMedium(
   return std::make_unique<g3::BluetoothClassicMedium>(adapter);
 }
 
-std::unique_ptr<BleMedium> ImplementationPlatform::CreateBleMedium(
+std::unique_ptr<api::ble::BleMedium> ImplementationPlatform::CreateBleMedium(
     api::BluetoothAdapter& adapter) {
-  return std::make_unique<g3::BleMedium>(adapter);
-}
-
-std::unique_ptr<api::ble_v2::BleMedium>
-ImplementationPlatform::CreateBleV2Medium(api::BluetoothAdapter& adapter) {
-  return std::make_unique<g3::BleV2Medium>(adapter);
+  return std::make_unique<g3::BleMedium>(
+      dynamic_cast<g3::BluetoothAdapter&>(adapter));
 }
 
 std::unique_ptr<api::CredentialStorage>
 ImplementationPlatform::CreateCredentialStorage() {
   return std::make_unique<g3::CredentialStorageImpl>();
-}
-
-std::unique_ptr<ServerSyncMedium>
-ImplementationPlatform::CreateServerSyncMedium() {
-  return std::unique_ptr<ServerSyncMedium>(/*new ServerSyncMediumImpl()*/);
 }
 
 std::unique_ptr<WifiMedium> ImplementationPlatform::CreateWifiMedium() {
@@ -211,6 +203,10 @@ std::unique_ptr<WifiMedium> ImplementationPlatform::CreateWifiMedium() {
 
 std::unique_ptr<WifiLanMedium> ImplementationPlatform::CreateWifiLanMedium() {
   return std::make_unique<g3::WifiLanMedium>();
+}
+
+std::unique_ptr<AwdlMedium> ImplementationPlatform::CreateAwdlMedium() {
+  return std::make_unique<g3::AwdlMedium>();
 }
 
 std::unique_ptr<WifiHotspotMedium>
@@ -232,6 +228,13 @@ std::unique_ptr<WebRtcMedium> ImplementationPlatform::CreateWebRtcMedium() {
   }
 }
 #endif
+
+std::unique_ptr<AppLifecycleMonitor>
+ImplementationPlatform::CreateAppLifecycleMonitor(
+    std::function<void(AppLifecycleMonitor::AppLifecycleState)>
+        state_updated_callback) {
+  return nullptr;
+}
 
 absl::StatusOr<WebResponse> ImplementationPlatform::SendRequest(
     const api::WebRequest& request) {
@@ -262,7 +265,7 @@ ImplementationPlatform::CreateDeviceInfo() {
 
 std::unique_ptr<nearby::api::PreferencesManager>
 ImplementationPlatform::CreatePreferencesManager(absl::string_view path) {
-  return std::make_unique<g3::PreferencesManager>(path);
+  return std::make_unique<g3::PreferencesManager>(FilePath(path));
 }
 
 }  // namespace api
