@@ -562,6 +562,9 @@ inline constexpr BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCred
         pin_(
             &::google::protobuf::internal::fixed_address_empty_string,
             ::_pbi::ConstantInitialized()),
+        device_name_(
+            &::google::protobuf::internal::fixed_address_empty_string,
+            ::_pbi::ConstantInitialized()),
         port_{0},
         frequency_{0} {}
 
@@ -972,6 +975,9 @@ inline constexpr ConnectionResponseFrame::Impl_::Impl_(
     ::_pbi::ConstantInitialized) noexcept
       : _cached_size_{0},
         handshake_data_(
+            &::google::protobuf::internal::fixed_address_empty_string,
+            ::_pbi::ConstantInitialized()),
+        wifi_direct_device_name_(
             &::google::protobuf::internal::fixed_address_empty_string,
             ::_pbi::ConstantInitialized()),
         os_info_{nullptr},
@@ -2056,44 +2062,47 @@ bool AutoReconnectFrame_EventType_Parse(::absl::string_view name, AutoReconnectF
   return success;
 }
 PROTOBUF_CONSTINIT const uint32_t MediumMetadata_WifiDirectAuthType_internal_data_[] = {
-    196608u, 0u, };
+    262144u, 0u, };
 static ::google::protobuf::internal::ExplicitlyConstructed<::std::string>
-    MediumMetadata_WifiDirectAuthType_strings[3] = {};
+    MediumMetadata_WifiDirectAuthType_strings[4] = {};
 
 static const char MediumMetadata_WifiDirectAuthType_names[] = {
     "WIFI_DIRECT_TYPE_UNKNOWN"
+    "WIFI_DIRECT_WITH_DEVICE_NAME"
     "WIFI_DIRECT_WITH_PASSWORD"
     "WIFI_DIRECT_WITH_PIN"
 };
 
 static const ::google::protobuf::internal::EnumEntry MediumMetadata_WifiDirectAuthType_entries[] = {
     {{&MediumMetadata_WifiDirectAuthType_names[0], 24}, 0},
-    {{&MediumMetadata_WifiDirectAuthType_names[24], 25}, 1},
-    {{&MediumMetadata_WifiDirectAuthType_names[49], 20}, 2},
+    {{&MediumMetadata_WifiDirectAuthType_names[24], 28}, 3},
+    {{&MediumMetadata_WifiDirectAuthType_names[52], 25}, 1},
+    {{&MediumMetadata_WifiDirectAuthType_names[77], 20}, 2},
 };
 
 static const int MediumMetadata_WifiDirectAuthType_entries_by_number[] = {
     0,  // 0 -> WIFI_DIRECT_TYPE_UNKNOWN
-    1,  // 1 -> WIFI_DIRECT_WITH_PASSWORD
-    2,  // 2 -> WIFI_DIRECT_WITH_PIN
+    2,  // 1 -> WIFI_DIRECT_WITH_PASSWORD
+    3,  // 2 -> WIFI_DIRECT_WITH_PIN
+    1,  // 3 -> WIFI_DIRECT_WITH_DEVICE_NAME
 };
 
 const ::std::string& MediumMetadata_WifiDirectAuthType_Name(MediumMetadata_WifiDirectAuthType value) {
   static const bool kDummy = ::google::protobuf::internal::InitializeEnumStrings(
-      MediumMetadata_WifiDirectAuthType_entries, MediumMetadata_WifiDirectAuthType_entries_by_number, 3,
+      MediumMetadata_WifiDirectAuthType_entries, MediumMetadata_WifiDirectAuthType_entries_by_number, 4,
       MediumMetadata_WifiDirectAuthType_strings);
   (void)kDummy;
 
   int idx = ::google::protobuf::internal::LookUpEnumName(MediumMetadata_WifiDirectAuthType_entries,
                                   MediumMetadata_WifiDirectAuthType_entries_by_number,
-                                  3, value);
+                                  4, value);
   return idx == -1 ? ::google::protobuf::internal::GetEmptyString() : MediumMetadata_WifiDirectAuthType_strings[idx].get();
 }
 
 bool MediumMetadata_WifiDirectAuthType_Parse(::absl::string_view name, MediumMetadata_WifiDirectAuthType* PROTOBUF_NONNULL value) {
   int int_value;
   bool success = ::google::protobuf::internal::LookUpEnumValue(
-      MediumMetadata_WifiDirectAuthType_entries, 3, name, &int_value);
+      MediumMetadata_WifiDirectAuthType_entries, 4, name, &int_value);
   if (success) {
     *value = static_cast<MediumMetadata_WifiDirectAuthType>(int_value);
   }
@@ -4104,7 +4113,8 @@ PROTOBUF_NDEBUG_INLINE ConnectionResponseFrame::Impl_::Impl_(
     [[maybe_unused]] const ::location::nearby::connections::ConnectionResponseFrame& from_msg)
       : _has_bits_{from._has_bits_},
         _cached_size_{0},
-        handshake_data_(arena, from.handshake_data_) {}
+        handshake_data_(arena, from.handshake_data_),
+        wifi_direct_device_name_(arena, from.wifi_direct_device_name_) {}
 
 ConnectionResponseFrame::ConnectionResponseFrame(
     ::google::protobuf::Arena* PROTOBUF_NULLABLE arena,
@@ -4120,10 +4130,10 @@ ConnectionResponseFrame::ConnectionResponseFrame(
       from._internal_metadata_);
   new (&_impl_) Impl_(internal_visibility(), arena, from._impl_, from);
   ::uint32_t cached_has_bits = _impl_._has_bits_[0];
-  _impl_.os_info_ = (CheckHasBit(cached_has_bits, 0x00000002U))
+  _impl_.os_info_ = (CheckHasBit(cached_has_bits, 0x00000004U))
                 ? ::google::protobuf::MessageLite::CopyConstruct(arena, *from._impl_.os_info_)
                 : nullptr;
-  _impl_.location_hint_ = (CheckHasBit(cached_has_bits, 0x00000004U))
+  _impl_.location_hint_ = (CheckHasBit(cached_has_bits, 0x00000008U))
                 ? ::google::protobuf::MessageLite::CopyConstruct(arena, *from._impl_.location_hint_)
                 : nullptr;
   ::memcpy(reinterpret_cast<char*>(&_impl_) +
@@ -4140,7 +4150,8 @@ PROTOBUF_NDEBUG_INLINE ConnectionResponseFrame::Impl_::Impl_(
     [[maybe_unused]] ::google::protobuf::internal::InternalVisibility visibility,
     [[maybe_unused]] ::google::protobuf::Arena* PROTOBUF_NULLABLE arena)
       : _cached_size_{0},
-        handshake_data_(arena) {}
+        handshake_data_(arena),
+        wifi_direct_device_name_(arena) {}
 
 inline void ConnectionResponseFrame::SharedCtor(::_pb::Arena* PROTOBUF_NULLABLE arena) {
   new (&_impl_) Impl_(internal_visibility(), arena);
@@ -4163,6 +4174,7 @@ inline void ConnectionResponseFrame::SharedDtor(MessageLite& self) {
   this_._internal_metadata_.Delete<::std::string>();
   ABSL_DCHECK(this_.GetArena() == nullptr);
   this_._impl_.handshake_data_.Destroy();
+  this_._impl_.wifi_direct_device_name_.Destroy();
   delete this_._impl_.os_info_;
   delete this_._impl_.location_hint_;
   this_._impl_.~Impl_();
@@ -4208,16 +4220,16 @@ ConnectionResponseFrame::GetClassData() const {
   return ConnectionResponseFrame_class_data_.base();
 }
 PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1
-const ::_pbi::TcParseTable<4, 9, 3, 0, 2>
+const ::_pbi::TcParseTable<4, 10, 3, 0, 2>
 ConnectionResponseFrame::_table_ = {
   {
     PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_._has_bits_),
     0, // no _extensions_
-    9, 120,  // max_field_number, fast_idx_mask
+    10, 120,  // max_field_number, fast_idx_mask
     offsetof(decltype(_table_), field_lookup_table),
-    4294966784,  // skipmap
+    4294966272,  // skipmap
     offsetof(decltype(_table_), field_entries),
-    9,  // num_field_entries
+    10,  // num_field_entries
     3,  // num_aux_entries
     offsetof(decltype(_table_), aux_entries),
     ConnectionResponseFrame_class_data_.base(),
@@ -4230,7 +4242,7 @@ ConnectionResponseFrame::_table_ = {
     {::_pbi::TcParser::MiniParse, {}},
     // optional int32 status = 1 [deprecated = true];
     {::_pbi::TcParser::FastV32S1,
-     {8, 3, 0,
+     {8, 4, 0,
       PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.status_)}},
     // optional bytes handshake_data = 2;
     {::_pbi::TcParser::FastBS1,
@@ -4238,33 +4250,36 @@ ConnectionResponseFrame::_table_ = {
       PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.handshake_data_)}},
     // optional .location.nearby.connections.ConnectionResponseFrame.ResponseStatus response = 3;
     {::_pbi::TcParser::FastEr0S1,
-     {24, 4, 2,
+     {24, 5, 2,
       PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.response_)}},
     // optional .location.nearby.connections.OsInfo os_info = 4;
     {::_pbi::TcParser::FastMtS1,
-     {34, 1, 0,
+     {34, 2, 0,
       PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.os_info_)}},
     // optional int32 multiplex_socket_bitmask = 5;
     {::_pbi::TcParser::FastV32S1,
-     {40, 5, 0,
+     {40, 6, 0,
       PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.multiplex_socket_bitmask_)}},
     // optional int32 nearby_connections_version = 6 [deprecated = true];
     {::_pbi::TcParser::FastV32S1,
-     {48, 6, 0,
+     {48, 7, 0,
       PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.nearby_connections_version_)}},
     // optional int32 safe_to_disconnect_version = 7;
     {::_pbi::TcParser::FastV32S1,
-     {56, 7, 0,
+     {56, 8, 0,
       PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.safe_to_disconnect_version_)}},
     // optional .location.nearby.connections.LocationHint location_hint = 8;
     {::_pbi::TcParser::FastMtS1,
-     {66, 2, 1,
+     {66, 3, 1,
       PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.location_hint_)}},
     // optional int32 keep_alive_timeout_millis = 9;
     {::_pbi::TcParser::FastV32S1,
-     {72, 8, 0,
+     {72, 9, 0,
       PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.keep_alive_timeout_millis_)}},
-    {::_pbi::TcParser::MiniParse, {}},
+    // optional string wifi_direct_device_name = 10;
+    {::_pbi::TcParser::FastBS1,
+     {82, 1, 0,
+      PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.wifi_direct_device_name_)}},
     {::_pbi::TcParser::MiniParse, {}},
     {::_pbi::TcParser::MiniParse, {}},
     {::_pbi::TcParser::MiniParse, {}},
@@ -4274,23 +4289,25 @@ ConnectionResponseFrame::_table_ = {
     65535, 65535
   }}, {{
     // optional int32 status = 1 [deprecated = true];
-    {PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.status_), _Internal::kHasBitsOffset + 3, 0, (0 | ::_fl::kFcOptional | ::_fl::kInt32)},
+    {PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.status_), _Internal::kHasBitsOffset + 4, 0, (0 | ::_fl::kFcOptional | ::_fl::kInt32)},
     // optional bytes handshake_data = 2;
     {PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.handshake_data_), _Internal::kHasBitsOffset + 0, 0, (0 | ::_fl::kFcOptional | ::_fl::kBytes | ::_fl::kRepAString)},
     // optional .location.nearby.connections.ConnectionResponseFrame.ResponseStatus response = 3;
-    {PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.response_), _Internal::kHasBitsOffset + 4, 2, (0 | ::_fl::kFcOptional | ::_fl::kEnumRange)},
+    {PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.response_), _Internal::kHasBitsOffset + 5, 2, (0 | ::_fl::kFcOptional | ::_fl::kEnumRange)},
     // optional .location.nearby.connections.OsInfo os_info = 4;
-    {PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.os_info_), _Internal::kHasBitsOffset + 1, 0, (0 | ::_fl::kFcOptional | ::_fl::kMessage | ::_fl::kTvTable)},
+    {PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.os_info_), _Internal::kHasBitsOffset + 2, 0, (0 | ::_fl::kFcOptional | ::_fl::kMessage | ::_fl::kTvTable)},
     // optional int32 multiplex_socket_bitmask = 5;
-    {PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.multiplex_socket_bitmask_), _Internal::kHasBitsOffset + 5, 0, (0 | ::_fl::kFcOptional | ::_fl::kInt32)},
+    {PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.multiplex_socket_bitmask_), _Internal::kHasBitsOffset + 6, 0, (0 | ::_fl::kFcOptional | ::_fl::kInt32)},
     // optional int32 nearby_connections_version = 6 [deprecated = true];
-    {PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.nearby_connections_version_), _Internal::kHasBitsOffset + 6, 0, (0 | ::_fl::kFcOptional | ::_fl::kInt32)},
+    {PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.nearby_connections_version_), _Internal::kHasBitsOffset + 7, 0, (0 | ::_fl::kFcOptional | ::_fl::kInt32)},
     // optional int32 safe_to_disconnect_version = 7;
-    {PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.safe_to_disconnect_version_), _Internal::kHasBitsOffset + 7, 0, (0 | ::_fl::kFcOptional | ::_fl::kInt32)},
+    {PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.safe_to_disconnect_version_), _Internal::kHasBitsOffset + 8, 0, (0 | ::_fl::kFcOptional | ::_fl::kInt32)},
     // optional .location.nearby.connections.LocationHint location_hint = 8;
-    {PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.location_hint_), _Internal::kHasBitsOffset + 2, 1, (0 | ::_fl::kFcOptional | ::_fl::kMessage | ::_fl::kTvTable)},
+    {PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.location_hint_), _Internal::kHasBitsOffset + 3, 1, (0 | ::_fl::kFcOptional | ::_fl::kMessage | ::_fl::kTvTable)},
     // optional int32 keep_alive_timeout_millis = 9;
-    {PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.keep_alive_timeout_millis_), _Internal::kHasBitsOffset + 8, 0, (0 | ::_fl::kFcOptional | ::_fl::kInt32)},
+    {PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.keep_alive_timeout_millis_), _Internal::kHasBitsOffset + 9, 0, (0 | ::_fl::kFcOptional | ::_fl::kInt32)},
+    // optional string wifi_direct_device_name = 10;
+    {PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.wifi_direct_device_name_), _Internal::kHasBitsOffset + 1, 0, (0 | ::_fl::kFcOptional | ::_fl::kBytes | ::_fl::kRepAString)},
   }},
   {{
       {::_pbi::TcParser::GetTable<::location::nearby::connections::OsInfo>()},
@@ -4308,25 +4325,32 @@ PROTOBUF_NOINLINE void ConnectionResponseFrame::Clear() {
   (void) cached_has_bits;
 
   cached_has_bits = _impl_._has_bits_[0];
-  if (BatchCheckHasBit(cached_has_bits, 0x00000007U)) {
+  if (BatchCheckHasBit(cached_has_bits, 0x0000000fU)) {
     if (CheckHasBit(cached_has_bits, 0x00000001U)) {
       _impl_.handshake_data_.ClearNonDefaultToEmpty();
     }
     if (CheckHasBit(cached_has_bits, 0x00000002U)) {
+      _impl_.wifi_direct_device_name_.ClearNonDefaultToEmpty();
+    }
+    if (CheckHasBit(cached_has_bits, 0x00000004U)) {
       ABSL_DCHECK(_impl_.os_info_ != nullptr);
       _impl_.os_info_->Clear();
     }
-    if (CheckHasBit(cached_has_bits, 0x00000004U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000008U)) {
       ABSL_DCHECK(_impl_.location_hint_ != nullptr);
       _impl_.location_hint_->Clear();
     }
   }
-  if (BatchCheckHasBit(cached_has_bits, 0x000000f8U)) {
+  if (BatchCheckHasBit(cached_has_bits, 0x000000f0U)) {
     ::memset(&_impl_.status_, 0, static_cast<::size_t>(
-        reinterpret_cast<char*>(&_impl_.safe_to_disconnect_version_) -
-        reinterpret_cast<char*>(&_impl_.status_)) + sizeof(_impl_.safe_to_disconnect_version_));
+        reinterpret_cast<char*>(&_impl_.nearby_connections_version_) -
+        reinterpret_cast<char*>(&_impl_.status_)) + sizeof(_impl_.nearby_connections_version_));
   }
-  _impl_.keep_alive_timeout_millis_ = 0;
+  if (BatchCheckHasBit(cached_has_bits, 0x00000300U)) {
+    ::memset(&_impl_.safe_to_disconnect_version_, 0, static_cast<::size_t>(
+        reinterpret_cast<char*>(&_impl_.keep_alive_timeout_millis_) -
+        reinterpret_cast<char*>(&_impl_.safe_to_disconnect_version_)) + sizeof(_impl_.keep_alive_timeout_millis_));
+  }
   _impl_._has_bits_.Clear();
   _internal_metadata_.Clear<::std::string>();
 }
@@ -4351,7 +4375,7 @@ PROTOBUF_NOINLINE void ConnectionResponseFrame::Clear() {
 
   cached_has_bits = this_._impl_._has_bits_[0];
   // optional int32 status = 1 [deprecated = true];
-  if (CheckHasBit(cached_has_bits, 0x00000008U)) {
+  if (CheckHasBit(cached_has_bits, 0x00000010U)) {
     target =
         ::google::protobuf::internal::WireFormatLite::WriteInt32ToArrayWithField<1>(
             stream, this_._internal_status(), target);
@@ -4364,52 +4388,58 @@ PROTOBUF_NOINLINE void ConnectionResponseFrame::Clear() {
   }
 
   // optional .location.nearby.connections.ConnectionResponseFrame.ResponseStatus response = 3;
-  if (CheckHasBit(cached_has_bits, 0x00000010U)) {
+  if (CheckHasBit(cached_has_bits, 0x00000020U)) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteEnumToArray(
         3, this_._internal_response(), target);
   }
 
   // optional .location.nearby.connections.OsInfo os_info = 4;
-  if (CheckHasBit(cached_has_bits, 0x00000002U)) {
+  if (CheckHasBit(cached_has_bits, 0x00000004U)) {
     target = ::google::protobuf::internal::WireFormatLite::InternalWriteMessage(
         4, *this_._impl_.os_info_, this_._impl_.os_info_->GetCachedSize(), target,
         stream);
   }
 
   // optional int32 multiplex_socket_bitmask = 5;
-  if (CheckHasBit(cached_has_bits, 0x00000020U)) {
+  if (CheckHasBit(cached_has_bits, 0x00000040U)) {
     target =
         ::google::protobuf::internal::WireFormatLite::WriteInt32ToArrayWithField<5>(
             stream, this_._internal_multiplex_socket_bitmask(), target);
   }
 
   // optional int32 nearby_connections_version = 6 [deprecated = true];
-  if (CheckHasBit(cached_has_bits, 0x00000040U)) {
+  if (CheckHasBit(cached_has_bits, 0x00000080U)) {
     target =
         ::google::protobuf::internal::WireFormatLite::WriteInt32ToArrayWithField<6>(
             stream, this_._internal_nearby_connections_version(), target);
   }
 
   // optional int32 safe_to_disconnect_version = 7;
-  if (CheckHasBit(cached_has_bits, 0x00000080U)) {
+  if (CheckHasBit(cached_has_bits, 0x00000100U)) {
     target =
         ::google::protobuf::internal::WireFormatLite::WriteInt32ToArrayWithField<7>(
             stream, this_._internal_safe_to_disconnect_version(), target);
   }
 
   // optional .location.nearby.connections.LocationHint location_hint = 8;
-  if (CheckHasBit(cached_has_bits, 0x00000004U)) {
+  if (CheckHasBit(cached_has_bits, 0x00000008U)) {
     target = ::google::protobuf::internal::WireFormatLite::InternalWriteMessage(
         8, *this_._impl_.location_hint_, this_._impl_.location_hint_->GetCachedSize(), target,
         stream);
   }
 
   // optional int32 keep_alive_timeout_millis = 9;
-  if (CheckHasBit(cached_has_bits, 0x00000100U)) {
+  if (CheckHasBit(cached_has_bits, 0x00000200U)) {
     target =
         ::google::protobuf::internal::WireFormatLite::WriteInt32ToArrayWithField<9>(
             stream, this_._internal_keep_alive_timeout_millis(), target);
+  }
+
+  // optional string wifi_direct_device_name = 10;
+  if (CheckHasBit(cached_has_bits, 0x00000002U)) {
+    const ::std::string& _s = this_._internal_wifi_direct_device_name();
+    target = stream->WriteStringMaybeAliased(10, _s, target);
   }
 
   if (ABSL_PREDICT_FALSE(this_._internal_metadata_.have_unknown_fields())) {
@@ -4443,45 +4473,50 @@ PROTOBUF_NOINLINE void ConnectionResponseFrame::Clear() {
       total_size += 1 + ::google::protobuf::internal::WireFormatLite::BytesSize(
                                       this_._internal_handshake_data());
     }
-    // optional .location.nearby.connections.OsInfo os_info = 4;
+    // optional string wifi_direct_device_name = 10;
     if (CheckHasBit(cached_has_bits, 0x00000002U)) {
+      total_size += 1 + ::google::protobuf::internal::WireFormatLite::StringSize(
+                                      this_._internal_wifi_direct_device_name());
+    }
+    // optional .location.nearby.connections.OsInfo os_info = 4;
+    if (CheckHasBit(cached_has_bits, 0x00000004U)) {
       total_size += 1 +
                     ::google::protobuf::internal::WireFormatLite::MessageSize(*this_._impl_.os_info_);
     }
     // optional .location.nearby.connections.LocationHint location_hint = 8;
-    if (CheckHasBit(cached_has_bits, 0x00000004U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000008U)) {
       total_size += 1 +
                     ::google::protobuf::internal::WireFormatLite::MessageSize(*this_._impl_.location_hint_);
     }
     // optional int32 status = 1 [deprecated = true];
-    if (CheckHasBit(cached_has_bits, 0x00000008U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000010U)) {
       total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(
           this_._internal_status());
     }
     // optional .location.nearby.connections.ConnectionResponseFrame.ResponseStatus response = 3;
-    if (CheckHasBit(cached_has_bits, 0x00000010U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000020U)) {
       total_size += 1 +
                     ::_pbi::WireFormatLite::EnumSize(this_._internal_response());
     }
     // optional int32 multiplex_socket_bitmask = 5;
-    if (CheckHasBit(cached_has_bits, 0x00000020U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000040U)) {
       total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(
           this_._internal_multiplex_socket_bitmask());
     }
     // optional int32 nearby_connections_version = 6 [deprecated = true];
-    if (CheckHasBit(cached_has_bits, 0x00000040U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000080U)) {
       total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(
           this_._internal_nearby_connections_version());
     }
+  }
+  if (BatchCheckHasBit(cached_has_bits, 0x00000300U)) {
     // optional int32 safe_to_disconnect_version = 7;
-    if (CheckHasBit(cached_has_bits, 0x00000080U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000100U)) {
       total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(
           this_._internal_safe_to_disconnect_version());
     }
-  }
-   {
     // optional int32 keep_alive_timeout_millis = 9;
-    if (CheckHasBit(cached_has_bits, 0x00000100U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000200U)) {
       total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(
           this_._internal_keep_alive_timeout_millis());
     }
@@ -4513,6 +4548,9 @@ void ConnectionResponseFrame::MergeImpl(::google::protobuf::MessageLite& to_msg,
       _this->_internal_set_handshake_data(from._internal_handshake_data());
     }
     if (CheckHasBit(cached_has_bits, 0x00000002U)) {
+      _this->_internal_set_wifi_direct_device_name(from._internal_wifi_direct_device_name());
+    }
+    if (CheckHasBit(cached_has_bits, 0x00000004U)) {
       ABSL_DCHECK(from._impl_.os_info_ != nullptr);
       if (_this->_impl_.os_info_ == nullptr) {
         _this->_impl_.os_info_ = ::google::protobuf::MessageLite::CopyConstruct(arena, *from._impl_.os_info_);
@@ -4520,7 +4558,7 @@ void ConnectionResponseFrame::MergeImpl(::google::protobuf::MessageLite& to_msg,
         _this->_impl_.os_info_->MergeFrom(*from._impl_.os_info_);
       }
     }
-    if (CheckHasBit(cached_has_bits, 0x00000004U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000008U)) {
       ABSL_DCHECK(from._impl_.location_hint_ != nullptr);
       if (_this->_impl_.location_hint_ == nullptr) {
         _this->_impl_.location_hint_ = ::google::protobuf::MessageLite::CopyConstruct(arena, *from._impl_.location_hint_);
@@ -4528,24 +4566,26 @@ void ConnectionResponseFrame::MergeImpl(::google::protobuf::MessageLite& to_msg,
         _this->_impl_.location_hint_->MergeFrom(*from._impl_.location_hint_);
       }
     }
-    if (CheckHasBit(cached_has_bits, 0x00000008U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000010U)) {
       _this->_impl_.status_ = from._impl_.status_;
     }
-    if (CheckHasBit(cached_has_bits, 0x00000010U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000020U)) {
       _this->_impl_.response_ = from._impl_.response_;
     }
-    if (CheckHasBit(cached_has_bits, 0x00000020U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000040U)) {
       _this->_impl_.multiplex_socket_bitmask_ = from._impl_.multiplex_socket_bitmask_;
     }
-    if (CheckHasBit(cached_has_bits, 0x00000040U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000080U)) {
       _this->_impl_.nearby_connections_version_ = from._impl_.nearby_connections_version_;
     }
-    if (CheckHasBit(cached_has_bits, 0x00000080U)) {
+  }
+  if (BatchCheckHasBit(cached_has_bits, 0x00000300U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000100U)) {
       _this->_impl_.safe_to_disconnect_version_ = from._impl_.safe_to_disconnect_version_;
     }
-  }
-  if (CheckHasBit(cached_has_bits, 0x00000100U)) {
-    _this->_impl_.keep_alive_timeout_millis_ = from._impl_.keep_alive_timeout_millis_;
+    if (CheckHasBit(cached_has_bits, 0x00000200U)) {
+      _this->_impl_.keep_alive_timeout_millis_ = from._impl_.keep_alive_timeout_millis_;
+    }
   }
   _this->_impl_._has_bits_[0] |= cached_has_bits;
   _this->_internal_metadata_.MergeFrom<::std::string>(
@@ -4567,6 +4607,7 @@ void ConnectionResponseFrame::InternalSwap(ConnectionResponseFrame* PROTOBUF_RES
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
   swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
   ::_pbi::ArenaStringPtr::InternalSwap(&_impl_.handshake_data_, &other->_impl_.handshake_data_, arena);
+  ::_pbi::ArenaStringPtr::InternalSwap(&_impl_.wifi_direct_device_name_, &other->_impl_.wifi_direct_device_name_, arena);
   ::google::protobuf::internal::memswap<
       PROTOBUF_FIELD_OFFSET(ConnectionResponseFrame, _impl_.keep_alive_timeout_millis_)
       + sizeof(ConnectionResponseFrame::_impl_.keep_alive_timeout_millis_)
@@ -7696,7 +7737,8 @@ PROTOBUF_NDEBUG_INLINE BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDire
         gateway_(arena, from.gateway_, _i_give_permission_to_break_this_code_default_gateway_),
         ip_v6_address_(arena, from.ip_v6_address_),
         service_name_(arena, from.service_name_),
-        pin_(arena, from.pin_) {}
+        pin_(arena, from.pin_),
+        device_name_(arena, from.device_name_) {}
 
 BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials(
     ::google::protobuf::Arena* PROTOBUF_NULLABLE arena,
@@ -7730,7 +7772,8 @@ PROTOBUF_NDEBUG_INLINE BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDire
         gateway_(arena, Impl_::_i_give_permission_to_break_this_code_default_gateway_),
         ip_v6_address_(arena),
         service_name_(arena),
-        pin_(arena) {}
+        pin_(arena),
+        device_name_(arena) {}
 
 inline void BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::SharedCtor(::_pb::Arena* PROTOBUF_NULLABLE arena) {
   new (&_impl_) Impl_(internal_visibility(), arena);
@@ -7758,6 +7801,7 @@ inline void BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentia
   this_._impl_.ip_v6_address_.Destroy();
   this_._impl_.service_name_.Destroy();
   this_._impl_.pin_.Destroy();
+  this_._impl_.device_name_.Destroy();
   this_._impl_.~Impl_();
 }
 
@@ -7801,16 +7845,16 @@ BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::GetClass
   return BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials_class_data_.base();
 }
 PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1
-const ::_pbi::TcParseTable<3, 8, 0, 0, 2>
+const ::_pbi::TcParseTable<4, 9, 0, 0, 2>
 BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::_table_ = {
   {
     PROTOBUF_FIELD_OFFSET(BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials, _impl_._has_bits_),
     0, // no _extensions_
-    8, 56,  // max_field_number, fast_idx_mask
+    9, 120,  // max_field_number, fast_idx_mask
     offsetof(decltype(_table_), field_lookup_table),
-    4294967040,  // skipmap
+    4294966784,  // skipmap
     offsetof(decltype(_table_), field_entries),
-    8,  // num_field_entries
+    9,  // num_field_entries
     0,  // num_aux_entries
     offsetof(decltype(_table_), field_names),  // no aux_entries
     BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials_class_data_.base(),
@@ -7820,10 +7864,7 @@ BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::_table_ 
     ::_pbi::TcParser::GetTable<::location::nearby::connections::BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials>(),  // to_prefetch
     #endif  // PROTOBUF_PREFETCH_PARSE_TABLE
   }, {{
-    // optional string pin = 8;
-    {::_pbi::TcParser::FastBS1,
-     {66, 5, 0,
-      PROTOBUF_FIELD_OFFSET(BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials, _impl_.pin_)}},
+    {::_pbi::TcParser::MiniParse, {}},
     // optional string ssid = 1;
     {::_pbi::TcParser::FastBS1,
      {10, 0, 0,
@@ -7834,11 +7875,11 @@ BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::_table_ 
       PROTOBUF_FIELD_OFFSET(BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials, _impl_.password_)}},
     // optional int32 port = 3;
     {::_pbi::TcParser::FastV32S1,
-     {24, 6, 0,
+     {24, 7, 0,
       PROTOBUF_FIELD_OFFSET(BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials, _impl_.port_)}},
     // optional int32 frequency = 4;
     {::_pbi::TcParser::FastV32S1,
-     {32, 7, 0,
+     {32, 8, 0,
       PROTOBUF_FIELD_OFFSET(BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials, _impl_.frequency_)}},
     // optional string gateway = 5 [default = "0.0.0.0"];
     {::_pbi::TcParser::FastBS1,
@@ -7848,10 +7889,24 @@ BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::_table_ 
     {::_pbi::TcParser::FastBS1,
      {50, 3, 0,
       PROTOBUF_FIELD_OFFSET(BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials, _impl_.ip_v6_address_)}},
-    // optional string service_name = 7;
+    // optional string service_name = 7 [deprecated = true];
     {::_pbi::TcParser::FastBS1,
      {58, 4, 0,
       PROTOBUF_FIELD_OFFSET(BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials, _impl_.service_name_)}},
+    // optional string pin = 8;
+    {::_pbi::TcParser::FastBS1,
+     {66, 5, 0,
+      PROTOBUF_FIELD_OFFSET(BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials, _impl_.pin_)}},
+    // optional string device_name = 9;
+    {::_pbi::TcParser::FastBS1,
+     {74, 6, 0,
+      PROTOBUF_FIELD_OFFSET(BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials, _impl_.device_name_)}},
+    {::_pbi::TcParser::MiniParse, {}},
+    {::_pbi::TcParser::MiniParse, {}},
+    {::_pbi::TcParser::MiniParse, {}},
+    {::_pbi::TcParser::MiniParse, {}},
+    {::_pbi::TcParser::MiniParse, {}},
+    {::_pbi::TcParser::MiniParse, {}},
   }}, {{
     65535, 65535
   }}, {{
@@ -7860,17 +7915,19 @@ BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::_table_ 
     // optional string password = 2;
     {PROTOBUF_FIELD_OFFSET(BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials, _impl_.password_), _Internal::kHasBitsOffset + 1, 0, (0 | ::_fl::kFcOptional | ::_fl::kBytes | ::_fl::kRepAString)},
     // optional int32 port = 3;
-    {PROTOBUF_FIELD_OFFSET(BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials, _impl_.port_), _Internal::kHasBitsOffset + 6, 0, (0 | ::_fl::kFcOptional | ::_fl::kInt32)},
+    {PROTOBUF_FIELD_OFFSET(BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials, _impl_.port_), _Internal::kHasBitsOffset + 7, 0, (0 | ::_fl::kFcOptional | ::_fl::kInt32)},
     // optional int32 frequency = 4;
-    {PROTOBUF_FIELD_OFFSET(BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials, _impl_.frequency_), _Internal::kHasBitsOffset + 7, 0, (0 | ::_fl::kFcOptional | ::_fl::kInt32)},
+    {PROTOBUF_FIELD_OFFSET(BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials, _impl_.frequency_), _Internal::kHasBitsOffset + 8, 0, (0 | ::_fl::kFcOptional | ::_fl::kInt32)},
     // optional string gateway = 5 [default = "0.0.0.0"];
     {PROTOBUF_FIELD_OFFSET(BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials, _impl_.gateway_), _Internal::kHasBitsOffset + 2, 0, (0 | ::_fl::kFcOptional | ::_fl::kBytes | ::_fl::kRepAString)},
     // optional bytes ip_v6_address = 6;
     {PROTOBUF_FIELD_OFFSET(BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials, _impl_.ip_v6_address_), _Internal::kHasBitsOffset + 3, 0, (0 | ::_fl::kFcOptional | ::_fl::kBytes | ::_fl::kRepAString)},
-    // optional string service_name = 7;
+    // optional string service_name = 7 [deprecated = true];
     {PROTOBUF_FIELD_OFFSET(BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials, _impl_.service_name_), _Internal::kHasBitsOffset + 4, 0, (0 | ::_fl::kFcOptional | ::_fl::kBytes | ::_fl::kRepAString)},
     // optional string pin = 8;
     {PROTOBUF_FIELD_OFFSET(BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials, _impl_.pin_), _Internal::kHasBitsOffset + 5, 0, (0 | ::_fl::kFcOptional | ::_fl::kBytes | ::_fl::kRepAString)},
+    // optional string device_name = 9;
+    {PROTOBUF_FIELD_OFFSET(BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials, _impl_.device_name_), _Internal::kHasBitsOffset + 6, 0, (0 | ::_fl::kFcOptional | ::_fl::kBytes | ::_fl::kRepAString)},
   }},
   // no aux_entries
   {{
@@ -7884,7 +7941,7 @@ PROTOBUF_NOINLINE void BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDire
   (void) cached_has_bits;
 
   cached_has_bits = _impl_._has_bits_[0];
-  if (BatchCheckHasBit(cached_has_bits, 0x0000003fU)) {
+  if (BatchCheckHasBit(cached_has_bits, 0x0000007fU)) {
     if (CheckHasBit(cached_has_bits, 0x00000001U)) {
       _impl_.ssid_.ClearNonDefaultToEmpty();
     }
@@ -7903,12 +7960,12 @@ PROTOBUF_NOINLINE void BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDire
     if (CheckHasBit(cached_has_bits, 0x00000020U)) {
       _impl_.pin_.ClearNonDefaultToEmpty();
     }
+    if (CheckHasBit(cached_has_bits, 0x00000040U)) {
+      _impl_.device_name_.ClearNonDefaultToEmpty();
+    }
   }
-  if (BatchCheckHasBit(cached_has_bits, 0x000000c0U)) {
-    ::memset(&_impl_.port_, 0, static_cast<::size_t>(
-        reinterpret_cast<char*>(&_impl_.frequency_) -
-        reinterpret_cast<char*>(&_impl_.port_)) + sizeof(_impl_.frequency_));
-  }
+  _impl_.port_ = 0;
+  _impl_.frequency_ = 0;
   _impl_._has_bits_.Clear();
   _internal_metadata_.Clear<::std::string>();
 }
@@ -7945,14 +8002,14 @@ PROTOBUF_NOINLINE void BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDire
   }
 
   // optional int32 port = 3;
-  if (CheckHasBit(cached_has_bits, 0x00000040U)) {
+  if (CheckHasBit(cached_has_bits, 0x00000080U)) {
     target =
         ::google::protobuf::internal::WireFormatLite::WriteInt32ToArrayWithField<3>(
             stream, this_._internal_port(), target);
   }
 
   // optional int32 frequency = 4;
-  if (CheckHasBit(cached_has_bits, 0x00000080U)) {
+  if (CheckHasBit(cached_has_bits, 0x00000100U)) {
     target =
         ::google::protobuf::internal::WireFormatLite::WriteInt32ToArrayWithField<4>(
             stream, this_._internal_frequency(), target);
@@ -7970,7 +8027,7 @@ PROTOBUF_NOINLINE void BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDire
     target = stream->WriteBytesMaybeAliased(6, _s, target);
   }
 
-  // optional string service_name = 7;
+  // optional string service_name = 7 [deprecated = true];
   if (CheckHasBit(cached_has_bits, 0x00000010U)) {
     const ::std::string& _s = this_._internal_service_name();
     target = stream->WriteStringMaybeAliased(7, _s, target);
@@ -7980,6 +8037,12 @@ PROTOBUF_NOINLINE void BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDire
   if (CheckHasBit(cached_has_bits, 0x00000020U)) {
     const ::std::string& _s = this_._internal_pin();
     target = stream->WriteStringMaybeAliased(8, _s, target);
+  }
+
+  // optional string device_name = 9;
+  if (CheckHasBit(cached_has_bits, 0x00000040U)) {
+    const ::std::string& _s = this_._internal_device_name();
+    target = stream->WriteStringMaybeAliased(9, _s, target);
   }
 
   if (ABSL_PREDICT_FALSE(this_._internal_metadata_.have_unknown_fields())) {
@@ -8028,7 +8091,7 @@ PROTOBUF_NOINLINE void BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDire
       total_size += 1 + ::google::protobuf::internal::WireFormatLite::BytesSize(
                                       this_._internal_ip_v6_address());
     }
-    // optional string service_name = 7;
+    // optional string service_name = 7 [deprecated = true];
     if (CheckHasBit(cached_has_bits, 0x00000010U)) {
       total_size += 1 + ::google::protobuf::internal::WireFormatLite::StringSize(
                                       this_._internal_service_name());
@@ -8038,13 +8101,20 @@ PROTOBUF_NOINLINE void BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDire
       total_size += 1 + ::google::protobuf::internal::WireFormatLite::StringSize(
                                       this_._internal_pin());
     }
-    // optional int32 port = 3;
+    // optional string device_name = 9;
     if (CheckHasBit(cached_has_bits, 0x00000040U)) {
+      total_size += 1 + ::google::protobuf::internal::WireFormatLite::StringSize(
+                                      this_._internal_device_name());
+    }
+    // optional int32 port = 3;
+    if (CheckHasBit(cached_has_bits, 0x00000080U)) {
       total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(
           this_._internal_port());
     }
+  }
+   {
     // optional int32 frequency = 4;
-    if (CheckHasBit(cached_has_bits, 0x00000080U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000100U)) {
       total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(
           this_._internal_frequency());
     }
@@ -8090,11 +8160,14 @@ void BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::Mer
       _this->_internal_set_pin(from._internal_pin());
     }
     if (CheckHasBit(cached_has_bits, 0x00000040U)) {
-      _this->_impl_.port_ = from._impl_.port_;
+      _this->_internal_set_device_name(from._internal_device_name());
     }
     if (CheckHasBit(cached_has_bits, 0x00000080U)) {
-      _this->_impl_.frequency_ = from._impl_.frequency_;
+      _this->_impl_.port_ = from._impl_.port_;
     }
+  }
+  if (CheckHasBit(cached_has_bits, 0x00000100U)) {
+    _this->_impl_.frequency_ = from._impl_.frequency_;
   }
   _this->_impl_._has_bits_[0] |= cached_has_bits;
   _this->_internal_metadata_.MergeFrom<::std::string>(
@@ -8121,6 +8194,7 @@ void BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::Int
   ::_pbi::ArenaStringPtr::InternalSwap(&_impl_.ip_v6_address_, &other->_impl_.ip_v6_address_, arena);
   ::_pbi::ArenaStringPtr::InternalSwap(&_impl_.service_name_, &other->_impl_.service_name_, arena);
   ::_pbi::ArenaStringPtr::InternalSwap(&_impl_.pin_, &other->_impl_.pin_, arena);
+  ::_pbi::ArenaStringPtr::InternalSwap(&_impl_.device_name_, &other->_impl_.device_name_, arena);
   ::google::protobuf::internal::memswap<
       PROTOBUF_FIELD_OFFSET(BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials, _impl_.frequency_)
       + sizeof(BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::_impl_.frequency_)
@@ -13302,7 +13376,7 @@ MediumMetadata::_table_ = {
       PROTOBUF_FIELD_OFFSET(MediumMetadata, _impl_.medium_role_)}},
     // repeated .location.nearby.connections.MediumMetadata.WifiDirectAuthType supported_wifi_direct_auth_types = 13 [packed = true];
     {::_pbi::TcParser::FastEr0P1,
-     {106, 0, 2,
+     {106, 0, 3,
       PROTOBUF_FIELD_OFFSET(MediumMetadata, _impl_.supported_wifi_direct_auth_types_)}},
     {::_pbi::TcParser::MiniParse, {}},
     {::_pbi::TcParser::MiniParse, {}},
@@ -13343,7 +13417,7 @@ MediumMetadata::_table_ = {
       {::_pbi::TcParser::GetTable<::location::nearby::connections::WifiAwareUsableChannels>()},
       {::_pbi::TcParser::GetTable<::location::nearby::connections::WifiHotspotStaUsableChannels>()},
       {::_pbi::TcParser::GetTable<::location::nearby::connections::MediumRole>()},
-      {0, 2},
+      {0, 3},
   }},
   {{
   }},

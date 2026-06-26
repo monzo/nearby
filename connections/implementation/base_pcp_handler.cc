@@ -36,7 +36,9 @@
 #include "connections/advertising_options.h"
 #include "connections/connection_options.h"
 #include "connections/discovery_options.h"
+#include "connections/implementation/analytics/analytics_recorder.h"
 #include "connections/implementation/analytics/connection_attempt_metadata_params.h"
+#include "connections/implementation/analytics/operation_result_with_medium.h"
 #include "connections/implementation/bwu_manager.h"
 #include "connections/implementation/client_proxy.h"
 #include "connections/implementation/connections_authentication_transport.h"
@@ -51,7 +53,6 @@
 #include "connections/implementation/mediums/webrtc_peer_id.h"
 #include "connections/implementation/offline_frames.h"
 #include "connections/implementation/pcp.h"
-#include "connections/implementation/proto/offline_wire_formats.pb.h"
 #include "connections/implementation/webrtc_state.h"
 #include "connections/listeners.h"
 #include "connections/medium_selector.h"
@@ -84,11 +85,24 @@
 #include "internal/platform/runnable.h"
 #include "internal/platform/wifi.h"
 #include "internal/platform/wifi_lan_connection_info.h"
-#include "proto/connections_enums.pb.h"
 
 namespace nearby::connections {
 
 namespace {
+using ::location::nearby::connections::ConnectionRequestFrame;
+using ::location::nearby::connections::ConnectionResponseFrame;
+using ::location::nearby::connections::ConnectionsDevice;
+using ::location::nearby::connections::MediumMetadata;
+using ::location::nearby::connections::OfflineFrame;
+using ::location::nearby::connections::OsInfo;
+using ::location::nearby::connections::PresenceDevice;
+using ::location::nearby::connections::V1Frame;
+using ::location::nearby::proto::connections::OperationResultCode;
+using ::location::nearby::proto::connections::WifiDirectAuthType;
+using ::nearby::analytics::AnalyticsRecorder;
+using ::nearby::analytics::OperationResultWithMedium;
+using ::securegcm::UKey2Handshake;
+
 constexpr int kEndpointCancelAlarmTimeout = 10;
 
 std::string AuthenticationStatusToString(nearby::AuthenticationStatus status) {
@@ -101,20 +115,8 @@ std::string AuthenticationStatusToString(nearby::AuthenticationStatus status) {
       return "failure";
   }
 }
-}  // namespace
 
-using ::location::nearby::analytics::proto::ConnectionsLog;
-using ::location::nearby::connections::ConnectionRequestFrame;
-using ::location::nearby::connections::ConnectionResponseFrame;
-using ::location::nearby::connections::ConnectionsDevice;
-using ::location::nearby::connections::MediumMetadata;
-using ::location::nearby::connections::OfflineFrame;
-using ::location::nearby::connections::OsInfo;
-using ::location::nearby::connections::PresenceDevice;
-using ::location::nearby::connections::V1Frame;
-using ::location::nearby::proto::connections::OperationResultCode;
-using ::location::nearby::proto::connections::WifiDirectAuthType;
-using ::securegcm::UKey2Handshake;
+}  // namespace
 
 BasePcpHandler::BasePcpHandler(Mediums* mediums,
                                EndpointManager* endpoint_manager,
@@ -278,11 +280,10 @@ Status BasePcpHandler::StartAdvertising(
         // Save the advertising options for local reference in later process
         // like upgrading bandwidth.
         advertising_listener_ = info.listener;
-        client->StartedAdvertising(
-            service_id, GetStrategy(), info.listener,
-            absl::MakeSpan(result.mediums),
-            std::move(result.operation_result_with_mediums),
-            compatible_advertising_options);
+        client->StartedAdvertising(service_id, GetStrategy(), info.listener,
+                                   absl::MakeSpan(result.mediums),
+                                   result.operation_result_with_mediums,
+                                   compatible_advertising_options);
         client->UpdateLocalEndpointInfo(info.endpoint_info.string_data());
         response.Set({Status::kSuccess});
       });
@@ -509,11 +510,11 @@ Status BasePcpHandler::StartDiscovery(ClientProxy* client,
               MutexLock lock(&discovered_endpoint_mutex_);
               discovered_endpoints_.clear();
             }
-            client->StartedDiscovery(
-                service_id, GetStrategy(), std::move(listener),
-                absl::MakeSpan(result.mediums),
-                std::move(result.operation_result_with_mediums),
-                stripped_discovery_options);
+            client->StartedDiscovery(service_id, GetStrategy(),
+                                     std::move(listener),
+                                     absl::MakeSpan(result.mediums),
+                                     result.operation_result_with_mediums,
+                                     stripped_discovery_options);
             response.Set({Status::kSuccess});
           });
   return WaitForResult(absl::StrCat("StartDiscovery(", service_id, ")"),
@@ -729,8 +730,15 @@ void BasePcpHandler::OnEncryptionSuccessRunnableV3(
   //
   // TODO(b/305004353): Authenticate the connection in the responder role for
   // outgoing connections.
-  if (!pending_connection_info.is_incoming) {
+  if (pending_connection_info.is_incoming) {
     LOG(ERROR) << __func__ << ": only outgoing connections are supported";
+    ProcessPreConnectionInitiationFailure(
+        pending_connection_info.client, pending_connection_info.medium,
+        remote_device.GetEndpointId(), pending_connection_info.channel.get(),
+        pending_connection_info.is_incoming, /*log_failure=*/true,
+        pending_connection_info.start_time, {Status::kConnectionRejected},
+        OperationResultCode::DETAIL_UNKNOWN,
+        pending_connection_info.result.lock().get());
     return;
   }
 
@@ -886,13 +894,19 @@ ConnectionInfo BasePcpHandler::FillConnectionInfo(
     connection_info.ap_frequency = wifi_info.ap_frequency;
     if (NearbyFlags::GetInstance().GetBoolFlag(
             config_package_nearby::nearby_connections_feature::
-                kEnableDynamicRoleSwitch) &&
-        client->GetLocalOsInfo().type() == OsInfo::APPLE) {
-      ::location::nearby::connections::MediumRole medium_role_info;
-      medium_role_info.set_support_awdl_publisher(true);
-      medium_role_info.set_support_awdl_subscriber(true);
-      medium_role_info.set_support_wifi_hotspot_client(true);
-      connection_info.medium_role.emplace(medium_role_info);
+                kEnableDynamicRoleSwitch)) {
+      LOG(INFO) << "kEnableDynamicRoleSwitch is enabled";
+      ClientProxy::MediumsAvailability mediums_availability;
+      mediums_availability.is_wifi_direct_go_available =
+          mediums_->GetWifiDirect().IsGOAvailable();
+      mediums_availability.is_wifi_direct_gc_available =
+          mediums_->GetWifiDirect().IsGCAvailable();
+      mediums_availability.is_wifi_hotspot_ap_available =
+          mediums_->GetWifiHotspot().IsAPAvailable();
+      mediums_availability.is_wifi_hotspot_client_available =
+          mediums_->GetWifiHotspot().IsClientAvailable();
+      connection_info.medium_role.emplace(
+          client->GetLocalMediumRole(mediums_availability));
     }
     LOG(INFO) << "Query for WIFI information: is_supports_5_ghz="
               << connection_info.supports_5_ghz
@@ -1011,8 +1025,8 @@ Status BasePcpHandler::RequestConnection(
               client, channel_medium, endpoint_id, channel.get(),
               /*is_incoming=*/false, /*log_failure=*/true, start_time,
               {Status::kEndpointIoError},
-              client->GetAnalyticsRecorder()
-                  .GetChannelIoErrorResultCodeFromMedium(channel_medium),
+              AnalyticsRecorder::GetChannelIoErrorResultCodeFromMedium(
+                  channel_medium),
               result.get());
           return;
         }
@@ -1173,8 +1187,8 @@ Status BasePcpHandler::RequestConnectionV3(
               client, channel_medium, endpoint_id, channel.get(),
               /*is_incoming=*/false, /*log_failure=*/true, start_time,
               {Status::kEndpointIoError},
-              client->GetAnalyticsRecorder()
-                  .GetChannelIoErrorResultCodeFromMedium(channel_medium),
+              AnalyticsRecorder::GetChannelIoErrorResultCodeFromMedium(
+                  channel_medium),
               result.get());
           return;
         }
@@ -1195,7 +1209,7 @@ Status BasePcpHandler::RequestConnectionV3(
         pending_connection_info.client = client;
         pending_connection_info.remote_endpoint_info = endpoint->endpoint_info;
         pending_connection_info.nonce = connection_info.nonce;
-        pending_connection_info.is_incoming = true;
+        pending_connection_info.is_incoming = false;
         pending_connection_info.start_time = start_time;
         pending_connection_info.listener = info.listener;
         pending_connection_info.connection_options = connection_options;
@@ -1297,22 +1311,21 @@ void BasePcpHandler::StripOutUnavailableMediums(
   }
 }
 
-std::unique_ptr<ConnectionsLog::OperationResultWithMedium>
+OperationResultWithMedium
 BasePcpHandler::GetOperationResultWithMediumByResultCode(
     ClientProxy* client, location::nearby::proto::connections::Medium medium,
     int update_index,
     location::nearby::proto::connections::OperationResultCode
         operation_result_code,
     location::nearby::proto::connections::ConnectionMode connection_mode) {
-  auto operation_result_with_medium =
-      std::make_unique<ConnectionsLog::OperationResultWithMedium>();
-  operation_result_with_medium->set_medium(medium);
-  operation_result_with_medium->set_result_code(operation_result_code);
-  operation_result_with_medium->set_result_category(
+  OperationResultWithMedium operation_result_with_medium;
+  operation_result_with_medium.set_medium(medium);
+  operation_result_with_medium.set_result_code(operation_result_code);
+  operation_result_with_medium.set_result_category(
       client->GetAnalyticsRecorder().GetOperationResultCategory(
           operation_result_code));
-  operation_result_with_medium->set_connection_mode(connection_mode);
-  operation_result_with_medium->set_update_index(update_index);
+  operation_result_with_medium.set_connection_mode(connection_mode);
+  operation_result_with_medium.set_update_index(update_index);
 
   return operation_result_with_medium;
 }
@@ -1578,8 +1591,7 @@ Status BasePcpHandler::AcceptConnection(ClientProxy* client,
 
         Exception write_exception =
             channel->Write(parser::ForConnectionResponse(
-                Status::kSuccess, client->GetLocalOsInfo(),
-                client->GetLocalMultiplexSocketBitmask()));
+                Status::kSuccess, client->GetLocalOsInfo()));
         if (!write_exception.Ok()) {
           LOG(INFO) << "AcceptConnection: failed to send response: endpoint_id="
                     << endpoint_id;
@@ -1640,8 +1652,7 @@ Status BasePcpHandler::RejectConnection(ClientProxy* client,
 
         Exception write_exception =
             channel->Write(parser::ForConnectionResponse(
-                Status::kConnectionRejected, client->GetLocalOsInfo(),
-                client->GetLocalMultiplexSocketBitmask()));
+                Status::kConnectionRejected, client->GetLocalOsInfo()));
         if (!write_exception.Ok()) {
           LOG(INFO) << "RejectConnection: failed to send response: endpoint_id="
                     << endpoint_id;
@@ -2032,8 +2043,7 @@ Exception BasePcpHandler::OnIncomingConnection(
           /*is_incoming=*/true,
           /*log_failure=*/wrapped_frame.exception() != Exception::kNoData,
           start_time, {Status::kError},
-          client->GetAnalyticsRecorder().GetChannelIoErrorResultCodeFromMedium(
-              medium),
+          AnalyticsRecorder::GetChannelIoErrorResultCodeFromMedium(medium),
           nullptr);
     }
     return wrapped_frame.GetException();
@@ -2457,26 +2467,6 @@ void BasePcpHandler::EvaluateConnectionResult(ClientProxy* client,
                                                      std::move(context))) {
       response_code = {Status::kEndpointUnknown};
     }
-
-    std::shared_ptr<EndpointChannel> channel =
-        channel_manager_->GetChannelForEndpoint(endpoint_id);
-    if (channel != nullptr) {
-      if (client->IsMultiplexSocketSupported(endpoint_id,
-                                             channel->GetMedium())) {
-        if (!channel->EnableMultiplexSocket()) {
-          LOG(INFO) << "MultiplexSocket is not implemented for Medium: "
-                    << location::nearby::proto::connections::Medium_Name(
-                           channel->GetMedium());
-        } else {
-          LOG(INFO) << "MultiplexSocket is supported for Medium: "
-                    << location::nearby::proto::connections::Medium_Name(
-                           channel->GetMedium())
-                    << " on both sides.";
-        }
-      }
-    } else {
-      LOG(INFO) << "channel is null";
-    }
   } else {
     LOG(INFO) << "Pending connection rejected; endpoint_id=" << endpoint_id;
     response_code = {Status::kConnectionRejected};
@@ -2584,7 +2574,7 @@ void BasePcpHandler::LogConnectionAttemptFailure(
       connections_attempt_metadata_params;
   if (endpoint_channel != nullptr) {
     connections_attempt_metadata_params =
-        client->GetAnalyticsRecorder().BuildConnectionAttemptMetadataParams(
+        AnalyticsRecorder::BuildConnectionAttemptMetadataParams(
             endpoint_channel->GetTechnology(), endpoint_channel->GetBand(),
             endpoint_channel->GetFrequency(), endpoint_channel->GetTryCount());
     connections_attempt_metadata_params->operation_result_code =
@@ -2610,12 +2600,11 @@ void BasePcpHandler::LogConnectionAttemptSuccess(
       connections_attempt_metadata_params;
   if (pending_connection_info.channel != nullptr) {
     connections_attempt_metadata_params =
-        pending_connection_info.client->GetAnalyticsRecorder()
-            .BuildConnectionAttemptMetadataParams(
-                pending_connection_info.channel->GetTechnology(),
-                pending_connection_info.channel->GetBand(),
-                pending_connection_info.channel->GetFrequency(),
-                pending_connection_info.channel->GetTryCount());
+        AnalyticsRecorder::BuildConnectionAttemptMetadataParams(
+            pending_connection_info.channel->GetTechnology(),
+            pending_connection_info.channel->GetBand(),
+            pending_connection_info.channel->GetFrequency(),
+            pending_connection_info.channel->GetTryCount());
     connections_attempt_metadata_params->operation_result_code =
         OperationResultCode::DETAIL_SUCCESS;
   } else {

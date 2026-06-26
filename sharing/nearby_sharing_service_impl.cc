@@ -65,7 +65,6 @@
 #include "sharing/common/nearby_share_enums.h"
 #include "sharing/common/nearby_share_prefs.h"
 #include "sharing/constants.h"
-#include "sharing/contacts/nearby_share_contact_manager.h"
 #include "sharing/fast_initiation/nearby_fast_initiation.h"
 #include "sharing/fast_initiation/nearby_fast_initiation_impl.h"
 #include "sharing/file_attachment.h"
@@ -233,6 +232,25 @@ std::string SendSurfaceStateToString(
   }
 }
 
+sync::SyncBinding::SourceDeviceType ShareTargetTypeToSourceDeviceType(
+    ShareTargetType share_target_type) {
+  switch (share_target_type) {
+    case ShareTargetType::kPhone:
+      return sync::SyncBinding::SOURCE_DEVICE_TYPE_PHONE;
+    case ShareTargetType::kTablet:
+      return sync::SyncBinding::SOURCE_DEVICE_TYPE_TABLET;
+    case ShareTargetType::kLaptop:
+      return sync::SyncBinding::SOURCE_DEVICE_TYPE_LAPTOP;
+    case ShareTargetType::kCar:
+      return sync::SyncBinding::SOURCE_DEVICE_TYPE_CAR;
+    case ShareTargetType::kFoldable:
+      return sync::SyncBinding::SOURCE_DEVICE_TYPE_FOLDABLE;
+    case ShareTargetType::kXR:
+      return sync::SyncBinding::SOURCE_DEVICE_TYPE_XR;
+    case ShareTargetType::kUnknown:
+      return sync::SyncBinding::SOURCE_DEVICE_TYPE_UNKNOWN;
+  }
+}
 }  // namespace
 
 NearbySharingServiceImpl::NearbySharingServiceImpl(
@@ -241,7 +259,6 @@ NearbySharingServiceImpl::NearbySharingServiceImpl(
     nearby::sharing::api::IdentityRpcClient* absl_nonnull
         nearby_identity_client,
     std::unique_ptr<NearbyConnectionsManager> nearby_connections_manager,
-    std::unique_ptr<NearbyShareContactManager> contact_manager,
     analytics::AnalyticsRecorder* analytics_recorder, bool supports_file_sync)
     : service_thread_(std::move(service_thread)),
       context_(context),
@@ -255,7 +272,6 @@ NearbySharingServiceImpl::NearbySharingServiceImpl(
       local_device_data_manager_(
           NearbyShareLocalDeviceDataManagerImpl::Factory::Create(
               preference_manager_, account_manager_, device_info_)),
-      contact_manager_(std::move(contact_manager)),
       nearby_fast_initiation_(
           NearbyFastInitiationImpl::Factory::Create(context_)),
       settings_(std::make_unique<NearbyShareSettings>(
@@ -649,8 +665,6 @@ void NearbySharingServiceImpl::RegisterReceiveSurface(
                 << background_receive_callbacks_map_.size();
 
         if (IsVisibleInBackground(settings_->GetVisibility())) {
-          // The Identity API does not support contact manager which triggers
-          // Certificate refresh in DownloadContacts. Force upload explicitly.
           VLOG(1) << "[Call Identity API] ForceUploadPrivateCertificates.";
           certificate_manager_->ForceUploadPrivateCertificates();
         }
@@ -1007,10 +1021,6 @@ void NearbySharingServiceImpl::SetVisibility(
 
 NearbyShareSettings* NearbySharingServiceImpl::GetSettings() {
   return settings_.get();
-}
-
-NearbyShareContactManager* NearbySharingServiceImpl::GetContactManager() {
-  return contact_manager_.get();
 }
 
 NearbyShareCertificateManager*
@@ -2216,9 +2226,10 @@ void NearbySharingServiceImpl::OnOutgoingConnection(
     session->RunPairedKeyVerification(
         ToProtoOsType(device_info_.GetOsType()),
         {
-            .visibility = settings_->GetVisibility(),
-            .last_visibility = settings_->GetLastVisibility(),
-            .last_visibility_time = settings_->GetLastVisibilityTimestamp(),
+          // Sender always uses ALL_CONTACTS cert to sign and verify signature.
+          .visibility = DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS,
+          .last_visibility = DeviceVisibility::DEVICE_VISIBILITY_ALL_CONTACTS,
+          .last_visibility_time = absl::UnixEpoch(),
         },
         GetCertificateManager(),
         absl::bind_front(
@@ -2257,16 +2268,15 @@ void NearbySharingServiceImpl::OnIncomingAdvertisementDecoded(
   // data to lambda.
   GetCertificateManager()->GetDecryptedPublicCertificate(
       std::move(encrypted_metadata_key),
-      [this, endpoint_id, advertisement_copy = *advertisement,
-       placeholder_share_target_id](
+      [this, endpoint_id = std::string(endpoint_id),
+       advertisement_copy = *advertisement, placeholder_share_target_id](
           std::optional<NearbyShareDecryptedPublicCertificate>
               decrypted_public_certificate) {
         RunOnNearbySharingServiceThread(
             "incoming_decrypted_certificate",
             // capture endpoint_id string_view as a std::string to ensure the
             // data does not go out of scope.
-            [this, endpoint_id = std::string(endpoint_id), advertisement_copy,
-             placeholder_share_target_id,
+            [this, endpoint_id, advertisement_copy, placeholder_share_target_id,
              decrypted_public_certificate =
                  std::move(decrypted_public_certificate)]() {
               OnIncomingDecryptedCertificate(endpoint_id, advertisement_copy,
@@ -2578,8 +2588,7 @@ void NearbySharingServiceImpl::BeginOutgoingTransfer(
   bool protection_enabled =
       preference_manager_.GetBoolean(PrefNames::kAdvancedProtectionEnabled,
                                      /*default_value=*/false);
-  session.SetAdvancedProtectionStatus(protection_enabled,
-                                      /*advanced_protection_mismatch=*/false);
+  session.SetAdvancedProtectionStatus(protection_enabled);
   if (session.token().empty() || !protection_enabled) {
     // Auto accept if no token or if advanced protection is disabled.
     OutgoingSessionAccept(session);
@@ -2659,6 +2668,11 @@ void NearbySharingServiceImpl::OnPeerSyncBindingComplete(
     session->Abort(TransferMetadata::Status::kFailed);
     return;
   }
+  LOG(INFO) << __func__ << ": Sync binding response succeeded, disconnecting.";
+  // Binding receiver side will wait for connection disconnect after sending the
+  // BindingResponse message.
+  session->Disconnect();
+
   sync::SyncBinding binding;
   binding.set_binding_id(binding_id);
   binding.set_source_name(session->share_target().device_name);
@@ -2666,6 +2680,8 @@ void NearbySharingServiceImpl::OnPeerSyncBindingComplete(
   FilePath destination_path{settings_->GetCustomSavePath()};
   destination_path.append(FilePath(session->share_target().device_name));
   binding.set_destination_directory(destination_path.ToString());
+  binding.set_source_device_type(
+      ShareTargetTypeToSourceDeviceType(session->share_target().type));
   sync_manager_.AddSyncBinding(binding);
   session->UpdateTransferMetadata(
       TransferMetadataBuilder()
@@ -2673,6 +2689,9 @@ void NearbySharingServiceImpl::OnPeerSyncBindingComplete(
           .set_binding_id(binding_id)
           .set_status(TransferMetadata::Status::kComplete)
           .build());
+
+  // Download public certificates again to update the newly added sync binding.
+  certificate_manager_->DownloadPublicCertificates();
 }
 
 void NearbySharingServiceImpl::OnReceivedIntroduction(
@@ -2686,6 +2705,28 @@ void NearbySharingServiceImpl::OnReceivedIntroduction(
     return;
   }
   FilePath save_path{settings_->GetCustomSavePath()};
+  // If transfer is for file sync, override the save path to the custom save
+  // path.
+  if (frame.use_case() == IntroductionFrame::FILE_SYNC) {
+    if (!session.certificate().has_value() ||
+        session.certificate()->binding_id().empty()) {
+      LOG(ERROR) << __func__
+                 << ": Binding id is empty for file sync session.";
+      Fail(session, TransferMetadata::Status::kRejected);
+      return;
+    }
+    std::optional<sync::SyncBinding> binding =
+        sync_manager_.GetSyncBinding(session.certificate()->binding_id());
+    if (!binding.has_value()) {
+      LOG(ERROR) << __func__
+                 << ": Sync binding not found for binding id: "
+                 << session.certificate()->binding_id();
+      Fail(session, TransferMetadata::Status::kRejected);
+      return;
+    }
+    save_path = FilePath(binding->destination_directory());
+    session.set_session_usage(ShareSessionUsage::kFileSync);
+  }
   // Override save path for this connection.
   // This must be called before the transfer is accepted and payloads are being
   // received.
@@ -3285,6 +3326,19 @@ void NearbySharingServiceImpl::UpdateFilePathsInProgress(
   update_file_paths_in_progress_ = update_file_paths;
   VLOG(1) << __func__
           << ": Update file paths in progress: " << update_file_paths;
+}
+
+void NearbySharingServiceImpl::UpdateBackupSavePath(
+    absl::string_view binding_id, absl::string_view save_path,
+    absl::AnyInvocable<void(NearbySharingService::StatusCodes)>
+        status_codes_callback) {
+  absl::StatusOr<FilePath> original_path =
+      sync_manager_.UpdateSyncBindingDestinationDirectory(binding_id,
+                                                          FilePath(save_path));
+  // TODO: b/485307320 - If original destination directory exists, move
+  // contents to the new destination directory.
+  status_codes_callback(
+      original_path.ok() ? StatusCodes::kOk : StatusCodes::kError);
 }
 
 }  // namespace nearby::sharing

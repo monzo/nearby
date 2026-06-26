@@ -27,8 +27,7 @@
 #include "internal/platform/exception.h"
 #include "internal/platform/implementation/system_clock.h"
 
-namespace nearby {
-namespace connections {
+namespace nearby::connections {
 
 // An endpoint channel implementation used for testing. The read and write
 // output can be set.
@@ -56,10 +55,8 @@ class FakeEndpointChannel : public EndpointChannel {
     is_closed_ = true;
     disconnection_reason_ = reason;
   }
-  void Close(
-      location::nearby::proto::connections::DisconnectionReason reason,
-      location::nearby::analytics::proto::ConnectionsLog::
-          EstablishedConnection::SafeDisconnectionResult result) override {
+  void Close(location::nearby::proto::connections::DisconnectionReason reason,
+             nearby::analytics::SafeDisconnectionResult result) override {
     Close(reason);
   }
   bool IsClosed() const override { return is_closed_; }
@@ -96,6 +93,10 @@ class FakeEndpointChannel : public EndpointChannel {
   }
   void SetAnalyticsRecorder(analytics::AnalyticsRecorder* analytics_recorder,
                             const std::string& endpoint_id) override {}
+  void SetLocalEndpointId(const std::string& local_endpoint_id) override {
+    local_endpoint_id_ = local_endpoint_id;
+  }
+  std::string GetLocalEndpointId() const override { return local_endpoint_id_; }
 
   void set_read_output(ExceptionOr<ByteArray> output) { read_output_ = output; }
   void set_write_output(Exception output) { write_output_ = output; }
@@ -116,10 +117,10 @@ class FakeEndpointChannel : public EndpointChannel {
   bool is_paused_ = false;
   location::nearby::proto::connections::DisconnectionReason
       disconnection_reason_;
+  std::string local_endpoint_id_;
   mutable uint32_t next_keep_alive_seq_no_ = 0;
 };
 
-}  // namespace connections
-}  // namespace nearby
+}  // namespace nearby::connections
 
 #endif  // NEARBY_CONNECTIONS_IMPLEMENTATION_FAKE_ENDPOINT_CHANNEL_H_

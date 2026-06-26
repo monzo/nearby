@@ -22,21 +22,23 @@
 #include <utility>
 #include <vector>
 
+#include "location/nearby/analytics/cpp/logging/mock_event_logger.h"
+#include "location/nearby/analytics/cpp/logging/sharing_log_matchers.h"
+#include "location/nearby/analytics/cpp/proto/nearby_sharing_log.pb.h"
+#include "location/nearby/analytics/cpp/proto/nearby_sharing_log.proto.static_reflection.h"
+#include "location/nearby/sharing/lib/analytics/analytics_recorder_impl.h"
 #include "net/proto2/contrib/parse_proto/parse_text_proto.h"
 #include "gmock/gmock.h"
 #include "protobuf-matchers/protocol-buffer-matchers.h"
 #include "gtest/gtest.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
-#include "internal/analytics/mock_event_logger.h"
-#include "internal/analytics/sharing_log_matchers.h"
 #include "internal/base/file_path.h"
 #include "internal/base/files.h"
 #include "internal/network/url.h"
 #include "internal/test/fake_clock.h"
 #include "internal/test/fake_device_info.h"
 #include "internal/test/fake_task_runner.h"
-#include "sharing/analytics/analytics_recorder.h"
 #include "sharing/attachment_container.h"
 #include "sharing/certificates/test_util.h"
 #include "sharing/common/nearby_share_enums.h"
@@ -46,8 +48,6 @@
 #include "sharing/nearby_connection_impl.h"
 #include "sharing/nearby_connections_manager.h"
 #include "sharing/nearby_connections_types.h"
-#include "sharing/proto/analytics/nearby_sharing_log.pb.h"
-#include "sharing/proto/analytics/nearby_sharing_log.proto.static_reflection.h"
 #include "sharing/proto/wire_format.pb.h"
 #include "sharing/share_session_usage.h"
 #include "sharing/share_target.h"
@@ -162,8 +162,8 @@ class OutgoingShareSessionTest : public ::testing::Test {
   FakeClock fake_clock_;
   FakeTaskRunner fake_task_runner_{&fake_clock_, 1};
   nearby::analytics::MockEventLogger mock_event_logger_;
-  analytics::AnalyticsRecorder analytics_recorder_{/*vendor_id=*/0,
-                                                   &mock_event_logger_};
+  analytics::AnalyticsRecorderImpl analytics_recorder_{/*vendor_id=*/0,
+                                                       &mock_event_logger_};
   ShareTarget share_target_;
   MockFunction<void(OutgoingShareSession&, const TransferMetadata&)>
       transfer_metadata_callback_;
@@ -676,11 +676,7 @@ TEST_F(OutgoingShareSessionTest, SendPayloads) {
       Log(Matcher<const SharingLog&>(AllOf(
           (HasCategory(EventCategory::SENDING_EVENT),
            HasEventType(EventType::SEND_ATTACHMENTS_START),
-           ProtoField<"send_attachments_start", "session_id">(1234),
-           ProtoField<"send_attachments_start", "advanced_protection_enabled">(
-               false),
-           ProtoField<"send_attachments_start", "advanced_protection_mismatch">(
-               false))))));
+           ProtoField<"send_attachments_start", "session_id">(1234))))));
 
   NearbyConnectionImpl connection(device_info_);
   ConnectionSuccess(&connection);
@@ -717,15 +713,12 @@ TEST_F(OutgoingShareSessionTest, SendPayloadsSetsAdvancedProtectionFlags) {
            HasEventType(EventType::SEND_ATTACHMENTS_START),
            ProtoField<"send_attachments_start", "session_id">(1234),
            ProtoField<"send_attachments_start", "advanced_protection_enabled">(
-               true),
-           ProtoField<"send_attachments_start", "advanced_protection_mismatch">(
                true))))));
 
   NearbyConnectionImpl connection(device_info_);
   ConnectionSuccess(&connection);
 
-  session_.SetAdvancedProtectionStatus(/*advanced_protection_enabled=*/true,
-                                       /*advanced_protection_mismatch=*/true);
+  session_.SetAdvancedProtectionStatus(/*advanced_protection_enabled=*/true);
   session_.SendPayloads([](bool is_timeout, std::optional<V1Frame> frame) {},
                         payload_transder_update_callback.AsStdFunction());
 
@@ -759,8 +752,6 @@ TEST_F(OutgoingShareSessionTest, SendNextPayload) {
            HasEventType(EventType::SEND_ATTACHMENTS_START),
            ProtoField<"send_attachments_start", "session_id">(1234),
            ProtoField<"send_attachments_start", "advanced_protection_enabled">(
-               false),
-           ProtoField<"send_attachments_start", "advanced_protection_mismatch">(
                false))))));
   NearbyConnectionImpl connection(device_info_);
   ConnectionSuccess(&connection);

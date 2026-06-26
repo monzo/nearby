@@ -80,8 +80,6 @@ cc_library(
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/meta:type_traits",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/strings:string_view",
@@ -231,7 +229,6 @@ cc_library(
         "count_down_latch.h",
         "crypto.h",
         "direct_executor.h",
-        "file.h",
         "future.h",
         "lockable.h",
         "monitored_runnable.h",
@@ -286,38 +283,6 @@ cc_library(
 )
 
 cc_library(
-    name = "tachyon_express_signaling_messenger",
-    srcs = ["tachyon_express_signaling_messenger.cc"],
-    hdrs = ["tachyon_express_signaling_messenger.h"],
-    visibility = [
-        "//connections:__subpackages__",
-        "//internal/platform/implementation:__subpackages__",
-        "//internal/test:__subpackages__",
-        "//third_party/nearby/presence:__subpackages__",
-    ],
-    deps = [
-        ":base",
-        ":logging",
-        ":types",
-        "//internal/account",
-        "//internal/platform/implementation:comm",
-        "//internal/proto:messaging_cc_grpc_proto",
-        "//internal/proto:tachyon_cc_proto",
-        "//internal/rpc:utils",
-        "//location/nearby/sharing/lib/account:account_manager",
-        "//third_party/grpc:gpr",
-        "//third_party/grpc:grpc++",
-        "//util/random:mt_random",
-        "//util/random:util",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/functional:any_invocable",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/synchronization",
-        "@com_google_absl//absl/time",
-    ],
-)
-
-cc_library(
     name = "comm",
     srcs = [
         "awdl.cc",
@@ -335,21 +300,18 @@ cc_library(
         "bluetooth_adapter.h",
         "bluetooth_classic.h",
         "credential_storage_impl.h",
-        "webrtc.h",
+        "file.h",
         "wifi.h",
         "wifi_direct.h",
         "wifi_hotspot.h",
         "wifi_lan.h",
     ],
-    copts = [
-        "-DCORE_ADAPTER_DLL",
-        "-DNO_WEBRTC",
-    ],
+    copts = ["-DCORE_ADAPTER_DLL"],
     visibility = [
         "//connections:__subpackages__",
         "//internal/platform/implementation:__subpackages__",
         "//internal/test:__subpackages__",
-        "//third_party/nearby/presence:__subpackages__",
+        "//sharing:__subpackages__",
     ],
     deps = [
         ":base",
@@ -363,9 +325,8 @@ cc_library(
         "//internal/flags:nearby_flags",
         "//internal/platform/implementation:comm",
         "//internal/platform/implementation:platform",
+        "//internal/platform/implementation:types",
         "//internal/platform/implementation:wifi_utils",
-        # "//third_party/webrtc/files/stable/webrtc/api:create_peerconnection_factory",  # buildcleaner: keep
-        # "//third_party/webrtc/files/stable/webrtc/api:peer_connection_interface",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
@@ -374,7 +335,6 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/time",
-        "@com_google_absl//absl/types:optional",
     ],
 )
 
@@ -414,6 +374,7 @@ cc_library(
         ":uuid",
         "//internal/base",
         "//internal/platform/implementation:comm",
+        "//internal/platform/implementation:webrtc_platform",
         "//internal/platform/implementation:wifi_utils",
         "//internal/test",
         "@com_google_absl//absl/base:core_headers",
@@ -609,6 +570,7 @@ cc_test(
     shard_count = 16,
     deps = [
         ":base",
+        ":comm",
         ":connection_info",
         ":logging",
         ":mac_address",
@@ -620,7 +582,6 @@ cc_test(
         "//internal/crypto_cros",
         "//internal/platform/implementation:platform_impl",
         "//internal/platform/implementation:types",
-        "//internal/test",
         "@com_github_protobuf_matchers//protobuf-matchers",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/status",

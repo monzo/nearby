@@ -55,15 +55,9 @@ constexpr auto kEnableGattClientDisconnection =
 // When true, enable multiplexing in NC for Bluetooth.
 constexpr auto kEnableMultiplexBluetooth =
     flags::Flag<bool>(kConfigPackage, "45676646", false);
-// When true, enable multiplexing in NC for Wifi.
-constexpr auto kEnableMultiplexWifiLan =
-    flags::Flag<bool>(kConfigPackage, "45676647", false);
 // Enable/Disable preferences for Nearby Connections.
 constexpr auto kEnableNearbyConnectionsPreferences =
     flags::Flag<bool>(kConfigPackage, "45732423", false);
-// Enable/Disable payload manager to skip chunk update.
-constexpr auto kEnablePayloadManagerToSkipChunkUpdate =
-    flags::Flag<bool>(kConfigPackage, "45415729", true);
 // Enable/Disable payload-received-ack feature.
 constexpr auto kEnablePayloadReceivedAck =
     flags::Flag<bool>(kConfigPackage, "45425840", false);
@@ -74,6 +68,9 @@ constexpr auto kEnableSafeToDisconnect =
 // servers.
 constexpr auto kEnableSharedPeripheralManager =
     flags::Flag<bool>(kConfigPackage, "45770787", false);
+// Enable/Disable single copy read/write for input/output buffers.
+constexpr auto kEnableSingleCopy =
+    flags::Flag<bool>(kConfigPackage, "45782646", true);
 // Stop BLE_V2 scanning when upgrading to WIFI Hotspot or WFD.
 constexpr auto kEnableStopBleScanningOnWifiUpgrade =
     flags::Flag<bool>(kConfigPackage, "45687902", false);
@@ -83,6 +80,9 @@ constexpr auto kEnableWifiDirect =
 // by default, enable Wi-Fi Hotspot client.
 constexpr auto kEnableWifiHotspotClient =
     flags::Flag<bool>(kConfigPackage, "45648734", true);
+// When true, fix the BleServerSocket deadlock/use-after-free (b/494335036).
+constexpr auto kFixBleServerSocketDeadlock =
+    flags::Flag<bool>(kConfigPackage, "45782647", true);
 // Default max transmit packet size for medium.
 constexpr auto kMediumDefaultMaxTransmitPacketSize =
     flags::Flag<int64_t>(kConfigPackage, "45669529", 65536);
@@ -98,12 +98,6 @@ constexpr auto kRefactorBleL2cap =
 // 4. auto-resume  5. non-distance-constraint-recovery 6. payload_ack
 constexpr auto kSafeToDisconnectVersion =
     flags::Flag<int64_t>(kConfigPackage, "45425841", 0);
-// Enable/Disable single copy read/write for input/output buffers.
-constexpr auto kEnableSingleCopy =
-    flags::Flag<bool>(kConfigPackage, "45782646", true);
-// When true, fix the BleServerSocket deadlock/use-after-free (b/494335036).
-constexpr auto kFixBleServerSocketDeadlock =
-    flags::Flag<bool>(kConfigPackage, "45782647", true);
 
 }  // namespace nearby_connections_feature
 }  // namespace config_package_nearby

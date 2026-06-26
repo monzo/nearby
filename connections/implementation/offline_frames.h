@@ -59,8 +59,7 @@ std::string ForConnectionRequestPresence(
     const location::nearby::connections::PresenceDevice& proto_presence_device,
     const ConnectionInfo& connection_info);
 std::string ForConnectionResponse(
-    std::int32_t status, const location::nearby::connections::OsInfo& os_info,
-    std::int32_t multiplex_socket_bitmask);
+    std::int32_t status, const location::nearby::connections::OsInfo& os_info);
 
 // Builds Payload transfer messages.
 std::string ForDataPayloadTransfer(
@@ -77,6 +76,7 @@ std::string ForPayloadAckPayloadTransfer(std::int64_t payload_id);
 
 // Builds Bandwidth Upgrade [BWU] messages.
 std::string ForBwuIntroduction(const std::string& endpoint_id,
+                             const std::string& last_endpoint_id,
                              bool supports_disabling_encryption);
 std::string ForBwuIntroductionAck();
 std::string ForBwuWifiHotspotPathAvailable(
@@ -99,7 +99,7 @@ std::string ForBwuWifiDirectPathAvailable(const std::string& ssid,
                                         std::int32_t frequency,
                                         bool supports_disabling_encryption,
                                         const std::string& gateway,
-                                        const std::string& service_name,
+                                        const std::string& device_name,
                                         const std::string& pin);
 std::string ForBwuBluetoothPathAvailable(const std::string& service_id,
                                        MacAddress mac_address);
@@ -108,7 +108,7 @@ std::string ForBwuWebrtcPathAvailable(
     const location::nearby::connections::LocationHint& location_hint_a);
 std::string ForBwuFailure(const UpgradePathInfo& info);
 std::string ForBwuPathRequest(
-    const std::vector<Medium>& mediums,
+    Medium medium, const std::vector<Medium>& mediums,
     const location::nearby::connections::MediumRole& medium_role);
 std::string ForBwuLastWrite();
 std::string ForBwuSafeToClose();

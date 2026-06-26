@@ -20,31 +20,32 @@
 #include <memory>
 #include <string>
 
+#include "location/nearby/sharing/lib/analytics/analytics_recorder_impl.h"
+#include "location/nearby/sharing/lib/rpc/fake_nearby_share_client.h"
 #include "location/nearby/sharing/lib/rpc/sharing_rpc_client.h"
+#include "location/nearby/sharing/lib/sync/sync_manager.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/functional/any_invocable.h"
+#include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "internal/base/observer_list.h"
 #include "internal/platform/clock.h"
+#include "internal/test/fake_clock.h"
+#include "internal/test/fake_task_runner.h"
 #include "sharing/advertisement.h"
 #include "sharing/attachment_container.h"
 #include "sharing/certificates/nearby_share_certificate_manager.h"
+#include "sharing/fake_nearby_connections_manager.h"
 #include "sharing/internal/api/preference_manager.h"
+#include "sharing/internal/test/fake_preference_manager.h"
 #include "sharing/nearby_sharing_service.h"
 #include "sharing/nearby_sharing_settings.h"
+#include "sharing/outgoing_targets_manager.h"
 #include "sharing/share_target.h"
 #include "sharing/share_target_discovered_callback.h"
 #include "sharing/transfer_metadata.h"
 #include "sharing/transfer_update_callback.h"
 #include "sharing/wrapped_share_target_discovered_callback.h"
-#include "internal/test/fake_clock.h"
-#include "internal/test/fake_task_runner.h"
-#include "location/nearby/sharing/lib/rpc/fake_nearby_share_client.h"
-#include "location/nearby/sharing/lib/sync/sync_manager.h"
-#include "sharing/analytics/analytics_recorder.h"
-#include "sharing/fake_nearby_connections_manager.h"
-#include "sharing/internal/test/fake_preference_manager.h"
-#include "sharing/outgoing_targets_manager.h"
 
 namespace nearby {
 namespace sharing {
@@ -135,7 +136,6 @@ class FakeNearbySharingService : public NearbySharingService {
   void UpdateFilePathsInProgress(bool update_file_paths) override {}
 
   NearbyShareSettings* GetSettings() override;
-  NearbyShareContactManager* GetContactManager() override;
   NearbyShareCertificateManager* GetCertificateManager() override;
   AccountManager* GetAccountManager() override;
   Clock& GetClock() override;
@@ -143,6 +143,10 @@ class FakeNearbySharingService : public NearbySharingService {
       uint16_t alternate_service_uuid) override {}
   SyncManager& sync_manager() override;
   OutgoingTargetsManager& outgoing_targets_manager() override;
+  void UpdateBackupSavePath(
+      absl::string_view binding_id, absl::string_view save_path,
+      absl::AnyInvocable<void(NearbySharingService::StatusCodes)>
+          status_codes_callback) override;
 
   nearby::sharing::api::IdentityRpcClient& fake_identity_rpc_client() {
     return identity_rpc_client_;
@@ -154,7 +158,7 @@ class FakeNearbySharingService : public NearbySharingService {
     return connections_manager_;
   }
   FakeTaskRunner& fake_task_runner() { return service_thread_; }
-  analytics::AnalyticsRecorder& analytics_recorder() {
+  analytics::AnalyticsRecorderImpl& analytics_recorder() {
     return analytics_recorder_;
   }
 
@@ -198,7 +202,7 @@ class FakeNearbySharingService : public NearbySharingService {
   FakeClock clock_;
   FakeTaskRunner service_thread_;
   FakeNearbyConnectionsManager connections_manager_;
-  analytics::AnalyticsRecorder analytics_recorder_;
+  analytics::AnalyticsRecorderImpl analytics_recorder_;
   FakePreferenceManager preference_manager_;
   FakeNearbyIdentityClient identity_rpc_client_;
   std::unique_ptr<SyncManager> sync_manager_;

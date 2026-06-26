@@ -47,9 +47,6 @@ constexpr auto kEnableMediumWifiLan =
 // Enable/disable retry/resume transfer for partial files.
 constexpr auto kEnableRetryResumeTransfer =
     flags::Flag<bool>(kConfigPackage, "45411589", false);
-// Enable/disable self share UI in Nearby Share
-constexpr auto kEnableSelfShareUi =
-    flags::Flag<bool>(kConfigPackage, "45418908", false);
 // Enable/disable sending desktop events
 constexpr auto kEnableSendingDesktopEvents =
     flags::Flag<bool>(kConfigPackage, "45459748", false);
@@ -64,9 +61,6 @@ constexpr auto kShowAutoUpdateSetting =
 // The default time in milliseconds a cached entry can be in LOST state.
 constexpr auto kDiscoveryCacheLostExpiryMs =
     flags::Flag<int64_t>(kConfigPackage, "45658774", 15000);
-// When true, enable file sync feature.
-constexpr auto kEnableFileSync =
-    flags::Flag<bool>(kConfigPackage, "45762616", false);
 // When true, enable wifi hotspot medium for HP Realtek devices.
 constexpr auto kEnableWifiHotspotForHpRealtekDevices =
     flags::Flag<bool>(kConfigPackage, "45673628", false);
@@ -101,9 +95,6 @@ constexpr auto kEnableMiniPulse =
 // When true, enables notifications implemented in native code.
 constexpr auto kEnableNativeNotifications =
     flags::Flag<bool>(kConfigPackage, "45743135", false);
-// When true, enables responsive UI.
-constexpr auto kEnableResponsiveUi =
-    flags::Flag<bool>(kConfigPackage, "45727212", false);
 
 inline absl::btree_map<int, const flags::Flag<bool>&> GetBoolFlags() {
   return {
@@ -112,10 +103,8 @@ inline absl::btree_map<int, const flags::Flag<bool>&> GetBoolFlags() {
       {45418905, kEnableMediumWebRtc},
       {45418906, kEnableMediumWifiLan},
       {45411589, kEnableRetryResumeTransfer},
-      {45418908, kEnableSelfShareUi},
       {45459748, kEnableSendingDesktopEvents},
       {45409033, kShowAutoUpdateSetting},
-      {45762616, kEnableFileSync},
       {45673628, kEnableWifiHotspotForHpRealtekDevices},
       {45683539, kUseAlternateServiceUuidForDiscovery},
       {45776229, kEnableBackup},
@@ -124,7 +113,6 @@ inline absl::btree_map<int, const flags::Flag<bool>&> GetBoolFlags() {
       {45720206, kEnableFlutterHooks},
       {45724244, kEnableMiniPulse},
       {45743135, kEnableNativeNotifications},
-      {45727212, kEnableResponsiveUi},
   };
 }
 

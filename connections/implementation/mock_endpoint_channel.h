@@ -40,8 +40,7 @@ class MockEndpointChannel : public EndpointChannel {
       (override));
   MOCK_METHOD(void, Close,
               (location::nearby::proto::connections::DisconnectionReason reason,
-               location::nearby::analytics::proto::ConnectionsLog::
-                   EstablishedConnection::SafeDisconnectionResult result),
+               nearby::analytics::SafeDisconnectionResult result),
               (override));
   MOCK_METHOD(bool, IsClosed, (), (const, override));
   MOCK_METHOD(std::string, GetType, (), (const, override));
@@ -70,6 +69,9 @@ class MockEndpointChannel : public EndpointChannel {
   MOCK_METHOD(uint32_t, GetNextKeepAliveSeqNo, (), (const, override));
   MOCK_METHOD(void, SetAnalyticsRecorder,
               (analytics::AnalyticsRecorder*, const std::string&), (override));
+  MOCK_METHOD(void, SetLocalEndpointId, (const std::string& local_endpoint_id),
+              (override));
+  MOCK_METHOD(std::string, GetLocalEndpointId, (), (const, override));
 };
 
 }  // namespace nearby::connections

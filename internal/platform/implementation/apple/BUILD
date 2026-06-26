@@ -52,6 +52,18 @@ objc_library(
 )
 
 objc_library(
+    name = "apple_webrtc",
+    srcs = [
+        "webrtc_platform.mm",
+    ],
+    deps = [
+        "//connections/implementation/mediums/webrtc:webrtc_medium_impl",
+        "//internal/platform/implementation:webrtc_platform",
+        "//third_party/apple_frameworks:Foundation",
+    ],
+)
+
+objc_library(
     name = "apple",
     srcs = [
         "awdl.mm",
@@ -61,7 +73,6 @@ objc_library(
         "preferences_manager.mm",
         "scheduled_executor.mm",
         "timer.mm",
-        "webrtc.mm",
         "wifi_hotspot.mm",
         "wifi_lan.mm",
     ],
@@ -70,7 +81,6 @@ objc_library(
         "device_info.h",
         "preferences_manager.h",
         "timer.h",
-        "webrtc.h",
         "wifi.h",
         "wifi_hotspot.h",
         "wifi_lan.h",
@@ -102,18 +112,14 @@ objc_library(
         "//internal/base:file_path",
         "//internal/base:files",
         "//internal/base:masker",
+        "//internal/platform/implementation/apple/Flags",
         "//internal/platform/implementation/apple/Mediums/Hotspot",
         "//internal/account",
         "//internal/crypto_cros",
         "//internal/platform:comm",
         "//internal/platform:logging",
-        "//internal/platform:tachyon_express_signaling_messenger",
         "//internal/platform:types",
         "//internal/proto:tachyon_cc_proto",
-        "//third_party/webrtc/files/stable/webrtc/api/task_queue:default_task_queue_factory",
-        # "//third_party/webrtc/files/stable/webrtc/api:create_modular_peer_connection_factory",
-        # "//third_party/webrtc/files/stable/webrtc/api:peer_connection_interface",
-        "//third_party/webrtc/files/stable/webrtc/rtc_base:checks",
         "//internal/platform:base",
         "//internal/platform/implementation:comm",
         "//internal/platform/implementation:platform",

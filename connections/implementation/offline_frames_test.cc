@@ -289,7 +289,7 @@ TEST(OfflineFramesTest,
           supports_5_ghz: true
           bssid: "FF:FF:FF:FF:FF:FF"
           ap_frequency: 2412
-          supported_wifi_direct_auth_types: WIFI_DIRECT_WITH_PIN
+          supported_wifi_direct_auth_types: WIFI_DIRECT_WITH_DEVICE_NAME
           supported_wifi_direct_auth_types: WIFI_DIRECT_WITH_PASSWORD
         >
         mediums: MDNS
@@ -324,7 +324,7 @@ TEST(OfflineFramesTest,
                                  kKeepAliveIntervalMillis,
                                  kKeepAliveTimeoutMillis};
   connection_info.supported_wifi_direct_auth_types = {
-      WifiDirectAuthType::WIFI_DIRECT_WITH_PIN,
+      WifiDirectAuthType::WIFI_DIRECT_WITH_DEVICE_NAME,
       WifiDirectAuthType::WIFI_DIRECT_WITH_PASSWORD};
 
   location::nearby::connections::ConnectionsDevice connections_device;
@@ -350,7 +350,7 @@ TEST(OfflineFramesTest, CanGenerateConnectionResponse) {
         status: 1
         response: REJECT
         os_info { type: LINUX }
-        multiplex_socket_bitmask: 0x01
+        multiplex_socket_bitmask: 0
         safe_to_disconnect_version: 5
       >
     >)pb";
@@ -361,8 +361,7 @@ TEST(OfflineFramesTest, CanGenerateConnectionResponse) {
       config_package_nearby::nearby_connections_feature::
           kSafeToDisconnectVersion,
       5);
-  auto response = FromBytes(
-      ForConnectionResponse(1, os_info, /*multiplex_socket_bitmask=*/0x01));
+  auto response = FromBytes(ForConnectionResponse(1, os_info));
   ASSERT_TRUE(response.ok());
   OfflineFrame message = response.result();
   EXPECT_THAT(message, EqualsProto(kExpected));
@@ -503,10 +502,7 @@ TEST(OfflineFramesTest, CanGenerateBwuWifiLanPathAvailable) {
               ip_address: "\x2a\x00\x79\xe0\x2e\x87\x00\x06\xb7\x28\x67\x45\x7a\xdd\x01\x53"
               port: 1234
             >
-            address_candidates: <
-              ip_address: "\001\002\003\004"
-              port: 1234
-            >
+            address_candidates: < ip_address: "\001\002\003\004" port: 1234 >
           >
           supports_client_introduction_ack: true
         >
@@ -597,7 +593,7 @@ TEST(OfflineFramesTest, CanGenerateBwuWifiDirectPathAvailable) {
             port: 1000
             frequency: 2412
             gateway: "192.168.1.1"
-            service_name: "NC-WifiDirectTest"
+            device_name: "NC-WifiDirectTest"
             pin: "b592f7d3"
           >
           supports_disabling_encryption: false
@@ -680,11 +676,13 @@ TEST(OfflineFramesTest, CanGenerateBwuIntroduction) {
         client_introduction: <
           endpoint_id: "ABC"
           supports_disabling_encryption: false
+          last_endpoint_id: "DEF"
         >
       >
     >)pb";
-  auto response = FromBytes(ForBwuIntroduction(
-      std::string(kEndpointId), false /* supports_disabling_encryption */));
+  auto response =
+      FromBytes(ForBwuIntroduction(std::string(kEndpointId), "DEF",
+                                   false /* supports_disabling_encryption */));
   ASSERT_TRUE(response.ok());
   OfflineFrame message = response.result();
   EXPECT_THAT(message, EqualsProto(kExpected));
@@ -723,7 +721,6 @@ TEST(OfflineFramesTest, CanGenerateDisconnection) {
   EXPECT_THAT(message, EqualsProto(kExpected));
 }
 
-
 TEST(OfflineFramesTest, CanGenerateBwuPathRequest) {
   constexpr absl::string_view kExpected =
       R"pb(
@@ -733,6 +730,7 @@ TEST(OfflineFramesTest, CanGenerateBwuPathRequest) {
       bandwidth_upgrade_negotiation: <
         event_type: UPGRADE_PATH_REQUEST
         upgrade_path_info: <
+          medium: WIFI_HOTSPOT
           upgrade_path_request: <
             mediums: WIFI_HOTSPOT
             medium_meta_data: <
@@ -746,7 +744,8 @@ TEST(OfflineFramesTest, CanGenerateBwuPathRequest) {
   mediums.push_back(Medium::WIFI_HOTSPOT);
   MediumRole medium_role;
   medium_role.set_support_wifi_hotspot_client(true);
-  auto response = FromBytes(ForBwuPathRequest(mediums, medium_role));
+  auto response =
+      FromBytes(ForBwuPathRequest(Medium::WIFI_HOTSPOT, mediums, medium_role));
   ASSERT_TRUE(response.ok());
   OfflineFrame message = response.result();
   EXPECT_THAT(message, EqualsProto(kExpected));
@@ -757,8 +756,8 @@ TEST(OfflineFramesTest, WFDAuthTypeToMediumMetadataWFDAuthType) {
                 WifiDirectAuthType::WIFI_DIRECT_WITH_PASSWORD),
             MediumMetadata::WIFI_DIRECT_WITH_PASSWORD);
   EXPECT_EQ(WFDAuthTypeToMediumMetadataWFDAuthType(
-                WifiDirectAuthType::WIFI_DIRECT_WITH_PIN),
-            MediumMetadata::WIFI_DIRECT_WITH_PIN);
+                WifiDirectAuthType::WIFI_DIRECT_WITH_DEVICE_NAME),
+            MediumMetadata::WIFI_DIRECT_WITH_DEVICE_NAME);
   EXPECT_EQ(WFDAuthTypeToMediumMetadataWFDAuthType(
                 WifiDirectAuthType::WIFI_DIRECT_TYPE_UNKNOWN),
             MediumMetadata::WIFI_DIRECT_TYPE_UNKNOWN);
@@ -769,8 +768,8 @@ TEST(OfflineFramesTest, MediumMetadataWFDAuthTypeToWFDAuthType) {
                 MediumMetadata::WIFI_DIRECT_WITH_PASSWORD),
             WifiDirectAuthType::WIFI_DIRECT_WITH_PASSWORD);
   EXPECT_EQ(MediumMetadataWFDAuthTypeToWFDAuthType(
-                MediumMetadata::WIFI_DIRECT_WITH_PIN),
-            WifiDirectAuthType::WIFI_DIRECT_WITH_PIN);
+                MediumMetadata::WIFI_DIRECT_WITH_DEVICE_NAME),
+            WifiDirectAuthType::WIFI_DIRECT_WITH_DEVICE_NAME);
   EXPECT_EQ(MediumMetadataWFDAuthTypeToWFDAuthType(
                 MediumMetadata::WIFI_DIRECT_TYPE_UNKNOWN),
             WifiDirectAuthType::WIFI_DIRECT_TYPE_UNKNOWN);
@@ -781,11 +780,11 @@ TEST(OfflineFramesTest, MediumMetadataWFDAuthTypesToWFDAuthTypes) {
   medium_metadata.add_supported_wifi_direct_auth_types(
       MediumMetadata::WIFI_DIRECT_WITH_PASSWORD);
   medium_metadata.add_supported_wifi_direct_auth_types(
-      MediumMetadata::WIFI_DIRECT_WITH_PIN);
+      MediumMetadata::WIFI_DIRECT_WITH_DEVICE_NAME);
 
   std::vector<WifiDirectAuthType> expected = {
       WifiDirectAuthType::WIFI_DIRECT_WITH_PASSWORD,
-      WifiDirectAuthType::WIFI_DIRECT_WITH_PIN};
+      WifiDirectAuthType::WIFI_DIRECT_WITH_DEVICE_NAME};
 
   EXPECT_THAT(MediumMetadataWFDAuthTypesToWFDAuthTypes(medium_metadata),
               Pointwise(testing::Eq(), expected));

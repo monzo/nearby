@@ -29,10 +29,7 @@
 #include "internal/platform/mutex.h"
 #include "internal/platform/mutex_lock.h"
 
-namespace nearby {
-namespace connections {
-using ::location::nearby::analytics::proto::ConnectionsLog;
-
+namespace nearby::connections {
 namespace {
 const absl::Duration kDataTransferDelay = absl::Milliseconds(500);
 }
@@ -110,6 +107,7 @@ void EndpointChannelManager::SetActiveEndpointChannel(
   // Update the channel first, then encrypt this new channel, if
   // crypto context is present.
   channel->SetAnalyticsRecorder(&client->GetAnalyticsRecorder(), endpoint_id);
+  channel->SetLocalEndpointId(client->GetLocalEndpointId());
   channel_state_.UpdateChannelForEndpoint(endpoint_id, std::move(channel));
   channel_state_.UpdateSafeToDisconnectForEndpoint(
       endpoint_id, client->IsSafeToDisconnectEnabled(endpoint_id));
@@ -183,7 +181,7 @@ void EndpointChannelManager::ChannelState::DestroyAll() {
   for (auto& item : endpoints_) {
     RemoveEndpoint(item.first, DisconnectionReason::SHUTDOWN,
                    /* safe_to_disconnect_enabled */ false,
-                   ConnectionsLog::EstablishedConnection::SAFE_DISCONNECTION);
+                   SafeDisconnectionResult::kSafeDisconnection);
   }
   endpoints_.clear();
 }
@@ -365,5 +363,4 @@ bool EndpointChannelManager::UnregisterChannelForEndpoint(
   return true;
 }
 
-}  // namespace connections
-}  // namespace nearby
+}  // namespace nearby::connections

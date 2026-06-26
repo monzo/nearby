@@ -180,8 +180,7 @@ std::string ForConnectionRequestPresence(
   return frame.SerializeAsString();
 }
 
-std::string ForConnectionResponse(std::int32_t status, const OsInfo& os_info,
-                                std::int32_t multiplex_socket_bitmask) {
+std::string ForConnectionResponse(std::int32_t status, const OsInfo& os_info) {
   OfflineFrame frame;
 
   frame.set_version(OfflineFrame::V1);
@@ -197,7 +196,7 @@ std::string ForConnectionResponse(std::int32_t status, const OsInfo& os_info,
                               ? ConnectionResponseFrame::ACCEPT
                               : ConnectionResponseFrame::REJECT);
   *sub_frame->mutable_os_info() = os_info;
-  sub_frame->set_multiplex_socket_bitmask(multiplex_socket_bitmask);
+  sub_frame->set_multiplex_socket_bitmask(0);
   sub_frame->set_safe_to_disconnect_version(
       NearbyFlags::GetInstance().GetInt64Flag(
           config_package_nearby::nearby_connections_feature::
@@ -364,7 +363,7 @@ std::string ForBwuWifiAwarePathAvailable(const std::string& service_id,
 std::string ForBwuWifiDirectPathAvailable(
     const std::string& ssid, const std::string& password, std::int32_t port,
     std::int32_t frequency, bool supports_disabling_encryption,
-    const std::string& gateway, const std::string& service_name,
+    const std::string& gateway, const std::string& device_name,
     const std::string& pin) {
   OfflineFrame frame;
 
@@ -386,7 +385,7 @@ std::string ForBwuWifiDirectPathAvailable(
   wifi_direct_credentials->set_port(port);
   wifi_direct_credentials->set_frequency(frequency);
   wifi_direct_credentials->set_gateway(gateway);
-  wifi_direct_credentials->set_service_name(service_name);
+  wifi_direct_credentials->set_device_name(device_name);
   wifi_direct_credentials->set_pin(pin);
 
   return frame.SerializeAsString();
@@ -461,6 +460,7 @@ std::string ForBwuSafeToClose() {
 }
 
 std::string ForBwuIntroduction(const std::string& endpoint_id,
+                             const std::string& last_endpoint_id,
                              bool supports_disabling_encryption) {
   OfflineFrame frame;
 
@@ -474,6 +474,9 @@ std::string ForBwuIntroduction(const std::string& endpoint_id,
   client_introduction->set_endpoint_id(endpoint_id);
   client_introduction->set_supports_disabling_encryption(
       supports_disabling_encryption);
+  if (!last_endpoint_id.empty()) {
+    client_introduction->set_last_endpoint_id(last_endpoint_id);
+  }
 
   return frame.SerializeAsString();
 }
@@ -499,15 +502,12 @@ std::string ForBwuFailure(const UpgradePathInfo& info) {
   v1_frame->set_type(V1Frame::BANDWIDTH_UPGRADE_NEGOTIATION);
   auto* sub_frame = v1_frame->mutable_bandwidth_upgrade_negotiation();
   sub_frame->set_event_type(BandwidthUpgradeNegotiationFrame::UPGRADE_FAILURE);
-  auto* upgrade_path_info = sub_frame->mutable_upgrade_path_info();
-  *upgrade_path_info = info;
-
   *sub_frame->mutable_upgrade_path_info() = info;
 
   return frame.SerializeAsString();
 }
 
-std::string ForBwuPathRequest(const std::vector<Medium>& mediums,
+std::string ForBwuPathRequest(Medium medium, const std::vector<Medium>& mediums,
                             const MediumRole& medium_role) {
   OfflineFrame frame;
 
@@ -517,8 +517,10 @@ std::string ForBwuPathRequest(const std::vector<Medium>& mediums,
   auto* sub_frame = v1_frame->mutable_bandwidth_upgrade_negotiation();
   sub_frame->set_event_type(
       BandwidthUpgradeNegotiationFrame::UPGRADE_PATH_REQUEST);
+  auto* upgrade_path_info = sub_frame->mutable_upgrade_path_info();
+  upgrade_path_info->set_medium(MediumToUpgradePathInfoMedium(medium));
   auto* upgrade_path_request =
-      sub_frame->mutable_upgrade_path_info()->mutable_upgrade_path_request();
+      upgrade_path_info->mutable_upgrade_path_request();
   for (const auto& medium : mediums) {
     upgrade_path_request->add_mediums(MediumToUpgradePathInfoMedium(medium));
   }
@@ -710,8 +712,8 @@ MediumMetadata::WifiDirectAuthType WFDAuthTypeToMediumMetadataWFDAuthType(
   switch (wifi_direct_auth_type) {
     case WifiDirectAuthType::WIFI_DIRECT_WITH_PASSWORD:
       return MediumMetadata::WIFI_DIRECT_WITH_PASSWORD;
-    case WifiDirectAuthType::WIFI_DIRECT_WITH_PIN:
-      return MediumMetadata::WIFI_DIRECT_WITH_PIN;
+    case WifiDirectAuthType::WIFI_DIRECT_WITH_DEVICE_NAME:
+      return MediumMetadata::WIFI_DIRECT_WITH_DEVICE_NAME;
     default:
       return MediumMetadata::WIFI_DIRECT_TYPE_UNKNOWN;
   }
@@ -722,8 +724,8 @@ WifiDirectAuthType MediumMetadataWFDAuthTypeToWFDAuthType(
   switch (wifi_direct_auth_type) {
     case MediumMetadata::WIFI_DIRECT_WITH_PASSWORD:
       return WifiDirectAuthType::WIFI_DIRECT_WITH_PASSWORD;
-    case MediumMetadata::WIFI_DIRECT_WITH_PIN:
-      return WifiDirectAuthType::WIFI_DIRECT_WITH_PIN;
+    case MediumMetadata::WIFI_DIRECT_WITH_DEVICE_NAME:
+      return WifiDirectAuthType::WIFI_DIRECT_WITH_DEVICE_NAME;
     default:
       return WifiDirectAuthType::WIFI_DIRECT_TYPE_UNKNOWN;
   }

@@ -35,8 +35,7 @@
 #include "proto/connections_enums.pb.h"
 #include "third_party/ukey2/src/main/cpp/include/securegcm/ukey2_handshake.h"
 
-namespace nearby {
-namespace connections {
+namespace nearby::connections {
 namespace {
 
 using ::location::nearby::proto::connections::Medium;
@@ -65,10 +64,8 @@ class FakeEndpointChannel : public EndpointChannel {
       override {
     Close();
   }
-  void Close(
-      location::nearby::proto::connections::DisconnectionReason reason,
-      location::nearby::analytics::proto::ConnectionsLog::
-          EstablishedConnection::SafeDisconnectionResult result) override {
+  void Close(location::nearby::proto::connections::DisconnectionReason reason,
+             nearby::analytics::SafeDisconnectionResult result) override {
     Close();
   }
   bool IsClosed() const override { return false; }
@@ -106,6 +103,10 @@ class FakeEndpointChannel : public EndpointChannel {
   }
   void SetAnalyticsRecorder(analytics::AnalyticsRecorder* analytics_recorder,
                             const std::string& endpoint_id) override {}
+  void SetLocalEndpointId(const std::string& local_endpoint_id) override {
+    local_endpoint_id_ = local_endpoint_id;
+  }
+  std::string GetLocalEndpointId() const override { return local_endpoint_id_; }
 
  private:
   InputStream* in_ = nullptr;
@@ -113,6 +114,7 @@ class FakeEndpointChannel : public EndpointChannel {
   absl::Time read_timestamp_ = absl::InfinitePast();
   absl::Time write_timestamp_ = absl::InfinitePast();
   mutable uint32_t next_keep_alive_seq_no_ = 0;
+  std::string local_endpoint_id_;
 };
 
 struct User {
@@ -410,5 +412,4 @@ TEST(EncryptionRunnerTest, ClientSendsGarbageMessage3) {
 }
 
 }  // namespace
-}  // namespace connections
-}  // namespace nearby
+}  // namespace nearby::connections

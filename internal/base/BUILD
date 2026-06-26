@@ -25,7 +25,6 @@ cc_library(
     visibility = [
         "//internal/account:__subpackages__",
         "//internal/platform:__subpackages__",
-        "//internal/test:__pkg__",
         "//location/nearby/sharing/lib:__subpackages__",
         "//sharing:__subpackages__",
     ],
@@ -50,8 +49,6 @@ cc_library(
     ],
     deps = [
         "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/strings:str_format",
-        "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:span",
     ],
 )

@@ -14,17 +14,18 @@
 
 #include "internal/platform/implementation/platform.h"
 
-#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
 
 #include "absl/base/attributes.h"
+#include "absl/base/no_destructor.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "third_party/gloop/thread/thread.h"
 #include "internal/base/file_path.h"
 #include "internal/base/files.h"
 #include "internal/platform/implementation/app_lifecycle_monitor.h"
@@ -55,11 +56,6 @@
 #include "internal/platform/logging.h"
 #include "internal/platform/os_name.h"
 #include "internal/platform/payload_id.h"
-#include "thread/thread.h"
-#ifndef NO_WEBRTC
-#include "internal/platform/implementation/g3/webrtc.h"
-#include "internal/platform/implementation/webrtc.h"
-#endif
 #include "internal/platform/implementation/g3/atomic_boolean.h"
 #include "internal/platform/implementation/g3/atomic_reference.h"
 #include "internal/platform/implementation/g3/ble.h"
@@ -80,7 +76,6 @@
 #include "internal/platform/implementation/g3/wifi_lan.h"
 #include "internal/platform/implementation/shared/file.h"
 #include "internal/platform/implementation/wifi.h"
-#include "internal/platform/medium_environment.h"
 
 namespace nearby {
 namespace api {
@@ -219,16 +214,6 @@ ImplementationPlatform::CreateWifiDirectMedium() {
   return std::make_unique<g3::WifiDirectMedium>();
 }
 
-#ifndef NO_WEBRTC
-std::unique_ptr<WebRtcMedium> ImplementationPlatform::CreateWebRtcMedium() {
-  if (MediumEnvironment::Instance().GetEnvironmentConfig().webrtc_enabled) {
-    return std::make_unique<g3::WebRtcMedium>();
-  } else {
-    return nullptr;
-  }
-}
-#endif
-
 std::unique_ptr<AppLifecycleMonitor>
 ImplementationPlatform::CreateAppLifecycleMonitor(
     std::function<void(AppLifecycleMonitor::AppLifecycleState)>
@@ -255,7 +240,8 @@ ImplementationPlatform::CreateConditionVariable(Mutex* mutex) {
 }
 
 std::unique_ptr<Timer> ImplementationPlatform::CreateTimer() {
-  return std::make_unique<g3::Timer>();
+  static absl::NoDestructor<g3::ScheduledExecutor> timer_executor;
+  return std::make_unique<g3::Timer>(timer_executor.get());
 }
 
 std::unique_ptr<nearby::api::DeviceInfo>

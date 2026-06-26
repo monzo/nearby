@@ -22,6 +22,7 @@
 
 #include "location/nearby/sharing/lib/sync/sync_manager.h"
 #include "absl/functional/any_invocable.h"
+#include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "internal/platform/clock.h"
 #include "sharing/advertisement.h"
@@ -36,7 +37,6 @@ namespace nearby::sharing {
 
 class AccountManager;
 class NearbyNotificationDelegate;
-class NearbyShareContactManager;
 
 // This service implements Nearby Sharing on top of the Nearby Connections mojo.
 // Currently, only single profile will be allowed to be bound at a time and only
@@ -222,7 +222,6 @@ class NearbySharingService {
   virtual void UpdateFilePathsInProgress(bool update_file_paths) = 0;
 
   virtual NearbyShareSettings* GetSettings() = 0;
-  virtual NearbyShareContactManager* GetContactManager() = 0;
   virtual NearbyShareCertificateManager* GetCertificateManager() = 0;
   virtual AccountManager* GetAccountManager() = 0;
   virtual Clock& GetClock() = 0;
@@ -230,6 +229,10 @@ class NearbySharingService {
       uint16_t alternate_service_uuid) = 0;
   virtual SyncManager& sync_manager() = 0;
   virtual OutgoingTargetsManager& outgoing_targets_manager() = 0;
+  virtual void UpdateBackupSavePath(
+      absl::string_view binding_id, absl::string_view save_path,
+      absl::AnyInvocable<void(NearbySharingService::StatusCodes)>
+          status_codes_callback) = 0;
 };
 
 }  // namespace nearby::sharing

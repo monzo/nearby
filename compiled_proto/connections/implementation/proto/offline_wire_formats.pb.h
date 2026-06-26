@@ -722,18 +722,19 @@ bool AutoReconnectFrame_EventType_Parse(
 enum MediumMetadata_WifiDirectAuthType : int {
   MediumMetadata_WifiDirectAuthType_WIFI_DIRECT_TYPE_UNKNOWN = 0,
   MediumMetadata_WifiDirectAuthType_WIFI_DIRECT_WITH_PASSWORD = 1,
-  MediumMetadata_WifiDirectAuthType_WIFI_DIRECT_WITH_PIN = 2,
+  MediumMetadata_WifiDirectAuthType_WIFI_DIRECT_WITH_PIN [[deprecated]] = 2,
+  MediumMetadata_WifiDirectAuthType_WIFI_DIRECT_WITH_DEVICE_NAME = 3,
 };
 
 extern const uint32_t MediumMetadata_WifiDirectAuthType_internal_data_[];
 inline constexpr MediumMetadata_WifiDirectAuthType MediumMetadata_WifiDirectAuthType_WifiDirectAuthType_MIN =
     static_cast<MediumMetadata_WifiDirectAuthType>(0);
 inline constexpr MediumMetadata_WifiDirectAuthType MediumMetadata_WifiDirectAuthType_WifiDirectAuthType_MAX =
-    static_cast<MediumMetadata_WifiDirectAuthType>(2);
+    static_cast<MediumMetadata_WifiDirectAuthType>(3);
 inline bool MediumMetadata_WifiDirectAuthType_IsValid(int value) {
-  return 0 <= value && value <= 2;
+  return 0 <= value && value <= 3;
 }
-inline constexpr int MediumMetadata_WifiDirectAuthType_WifiDirectAuthType_ARRAYSIZE = 2 + 1;
+inline constexpr int MediumMetadata_WifiDirectAuthType_WifiDirectAuthType_ARRAYSIZE = 3 + 1;
 const ::std::string& MediumMetadata_WifiDirectAuthType_Name(MediumMetadata_WifiDirectAuthType value);
 template <typename T>
 const ::std::string& MediumMetadata_WifiDirectAuthType_Name(T value) {
@@ -4914,6 +4915,7 @@ class BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials fin
     kIpV6AddressFieldNumber = 6,
     kServiceNameFieldNumber = 7,
     kPinFieldNumber = 8,
+    kDeviceNameFieldNumber = 9,
     kPortFieldNumber = 3,
     kFrequencyFieldNumber = 4,
   };
@@ -4981,15 +4983,15 @@ class BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials fin
   ::std::string* PROTOBUF_NONNULL _internal_mutable_ip_v6_address();
 
   public:
-  // optional string service_name = 7;
-  bool has_service_name() const;
-  void clear_service_name() ;
-  const ::std::string& service_name() const;
+  // optional string service_name = 7 [deprecated = true];
+  [[deprecated]]  bool has_service_name() const;
+  [[deprecated]]  void clear_service_name() ;
+  [[deprecated]] const ::std::string& service_name() const;
   template <typename Arg_ = const ::std::string&, typename... Args_>
-  void set_service_name(Arg_&& arg, Args_... args);
-  ::std::string* PROTOBUF_NONNULL mutable_service_name();
-  [[nodiscard]] ::std::string* PROTOBUF_NULLABLE release_service_name();
-  void set_allocated_service_name(::std::string* PROTOBUF_NULLABLE value);
+  [[deprecated]] void set_service_name(Arg_&& arg, Args_... args);
+  [[deprecated]] ::std::string* PROTOBUF_NONNULL mutable_service_name();
+  [[deprecated]] [[nodiscard]] ::std::string* PROTOBUF_NULLABLE release_service_name();
+  [[deprecated]] void set_allocated_service_name(::std::string* PROTOBUF_NULLABLE value);
 
   private:
   const ::std::string& _internal_service_name() const;
@@ -5011,6 +5013,22 @@ class BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials fin
   const ::std::string& _internal_pin() const;
   PROTOBUF_ALWAYS_INLINE void _internal_set_pin(const ::std::string& value);
   ::std::string* PROTOBUF_NONNULL _internal_mutable_pin();
+
+  public:
+  // optional string device_name = 9;
+  bool has_device_name() const;
+  void clear_device_name() ;
+  const ::std::string& device_name() const;
+  template <typename Arg_ = const ::std::string&, typename... Args_>
+  void set_device_name(Arg_&& arg, Args_... args);
+  ::std::string* PROTOBUF_NONNULL mutable_device_name();
+  [[nodiscard]] ::std::string* PROTOBUF_NULLABLE release_device_name();
+  void set_allocated_device_name(::std::string* PROTOBUF_NULLABLE value);
+
+  private:
+  const ::std::string& _internal_device_name() const;
+  PROTOBUF_ALWAYS_INLINE void _internal_set_device_name(const ::std::string& value);
+  ::std::string* PROTOBUF_NONNULL _internal_mutable_device_name();
 
   public:
   // optional int32 port = 3;
@@ -5039,7 +5057,7 @@ class BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials fin
  private:
   class _Internal;
   friend class ::google::protobuf::internal::TcParser;
-  static const ::google::protobuf::internal::TcParseTable<3, 8,
+  static const ::google::protobuf::internal::TcParseTable<4, 9,
                                    0, 0,
                                    2>
       _table_;
@@ -5068,6 +5086,7 @@ class BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials fin
     ::google::protobuf::internal::ArenaStringPtr ip_v6_address_;
     ::google::protobuf::internal::ArenaStringPtr service_name_;
     ::google::protobuf::internal::ArenaStringPtr pin_;
+    ::google::protobuf::internal::ArenaStringPtr device_name_;
     ::int32_t port_;
     ::int32_t frequency_;
     PROTOBUF_TSAN_DECLARE_MEMBER
@@ -7679,7 +7698,8 @@ class MediumMetadata final : public ::google::protobuf::MessageLite
   using WifiDirectAuthType = MediumMetadata_WifiDirectAuthType;
   static constexpr WifiDirectAuthType WIFI_DIRECT_TYPE_UNKNOWN = MediumMetadata_WifiDirectAuthType_WIFI_DIRECT_TYPE_UNKNOWN;
   static constexpr WifiDirectAuthType WIFI_DIRECT_WITH_PASSWORD = MediumMetadata_WifiDirectAuthType_WIFI_DIRECT_WITH_PASSWORD;
-  static constexpr WifiDirectAuthType WIFI_DIRECT_WITH_PIN = MediumMetadata_WifiDirectAuthType_WIFI_DIRECT_WITH_PIN;
+  [[deprecated]] static constexpr WifiDirectAuthType WIFI_DIRECT_WITH_PIN = MediumMetadata_WifiDirectAuthType_WIFI_DIRECT_WITH_PIN;
+  static constexpr WifiDirectAuthType WIFI_DIRECT_WITH_DEVICE_NAME = MediumMetadata_WifiDirectAuthType_WIFI_DIRECT_WITH_DEVICE_NAME;
   static inline bool WifiDirectAuthType_IsValid(int value) {
     return MediumMetadata_WifiDirectAuthType_IsValid(value);
   }
@@ -8094,6 +8114,7 @@ class ConnectionResponseFrame final : public ::google::protobuf::MessageLite
   // accessors -------------------------------------------------------
   enum : int {
     kHandshakeDataFieldNumber = 2,
+    kWifiDirectDeviceNameFieldNumber = 10,
     kOsInfoFieldNumber = 4,
     kLocationHintFieldNumber = 8,
     kStatusFieldNumber = 1,
@@ -8117,6 +8138,22 @@ class ConnectionResponseFrame final : public ::google::protobuf::MessageLite
   const ::std::string& _internal_handshake_data() const;
   PROTOBUF_ALWAYS_INLINE void _internal_set_handshake_data(const ::std::string& value);
   ::std::string* PROTOBUF_NONNULL _internal_mutable_handshake_data();
+
+  public:
+  // optional string wifi_direct_device_name = 10;
+  bool has_wifi_direct_device_name() const;
+  void clear_wifi_direct_device_name() ;
+  const ::std::string& wifi_direct_device_name() const;
+  template <typename Arg_ = const ::std::string&, typename... Args_>
+  void set_wifi_direct_device_name(Arg_&& arg, Args_... args);
+  ::std::string* PROTOBUF_NONNULL mutable_wifi_direct_device_name();
+  [[nodiscard]] ::std::string* PROTOBUF_NULLABLE release_wifi_direct_device_name();
+  void set_allocated_wifi_direct_device_name(::std::string* PROTOBUF_NULLABLE value);
+
+  private:
+  const ::std::string& _internal_wifi_direct_device_name() const;
+  PROTOBUF_ALWAYS_INLINE void _internal_set_wifi_direct_device_name(const ::std::string& value);
+  ::std::string* PROTOBUF_NONNULL _internal_mutable_wifi_direct_device_name();
 
   public:
   // optional .location.nearby.connections.OsInfo os_info = 4;
@@ -8219,7 +8256,7 @@ class ConnectionResponseFrame final : public ::google::protobuf::MessageLite
  private:
   class _Internal;
   friend class ::google::protobuf::internal::TcParser;
-  static const ::google::protobuf::internal::TcParseTable<4, 9,
+  static const ::google::protobuf::internal::TcParseTable<4, 10,
                                    3, 0,
                                    2>
       _table_;
@@ -8242,6 +8279,7 @@ class ConnectionResponseFrame final : public ::google::protobuf::MessageLite
     ::google::protobuf::internal::HasBits<1> _has_bits_;
     ::google::protobuf::internal::CachedSize _cached_size_;
     ::google::protobuf::internal::ArenaStringPtr handshake_data_;
+    ::google::protobuf::internal::ArenaStringPtr wifi_direct_device_name_;
     ::location::nearby::connections::OsInfo* PROTOBUF_NULLABLE os_info_;
     ::location::nearby::connections::LocationHint* PROTOBUF_NULLABLE location_hint_;
     ::int32_t status_;
@@ -13206,14 +13244,14 @@ inline ConnectionRequestFrame::DeviceCase ConnectionRequestFrame::Device_case() 
 
 // optional int32 status = 1 [deprecated = true];
 inline bool ConnectionResponseFrame::has_status() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000008U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000010U);
   return value;
 }
 inline void ConnectionResponseFrame::clear_status() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.status_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000008U);
+                  0x00000010U);
 }
 inline ::int32_t ConnectionResponseFrame::status() const {
   // @@protoc_insertion_point(field_get:location.nearby.connections.ConnectionResponseFrame.status)
@@ -13221,7 +13259,7 @@ inline ::int32_t ConnectionResponseFrame::status() const {
 }
 inline void ConnectionResponseFrame::set_status(::int32_t value) {
   _internal_set_status(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000008U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000010U);
   // @@protoc_insertion_point(field_set:location.nearby.connections.ConnectionResponseFrame.status)
 }
 inline ::int32_t ConnectionResponseFrame::_internal_status() const {
@@ -13304,14 +13342,14 @@ inline void ConnectionResponseFrame::set_allocated_handshake_data(::std::string*
 
 // optional .location.nearby.connections.ConnectionResponseFrame.ResponseStatus response = 3;
 inline bool ConnectionResponseFrame::has_response() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000010U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000020U);
   return value;
 }
 inline void ConnectionResponseFrame::clear_response() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.response_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000010U);
+                  0x00000020U);
 }
 inline ::location::nearby::connections::ConnectionResponseFrame_ResponseStatus ConnectionResponseFrame::response() const {
   // @@protoc_insertion_point(field_get:location.nearby.connections.ConnectionResponseFrame.response)
@@ -13319,7 +13357,7 @@ inline ::location::nearby::connections::ConnectionResponseFrame_ResponseStatus C
 }
 inline void ConnectionResponseFrame::set_response(::location::nearby::connections::ConnectionResponseFrame_ResponseStatus value) {
   _internal_set_response(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000010U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000020U);
   // @@protoc_insertion_point(field_set:location.nearby.connections.ConnectionResponseFrame.response)
 }
 inline ::location::nearby::connections::ConnectionResponseFrame_ResponseStatus ConnectionResponseFrame::_internal_response() const {
@@ -13336,7 +13374,7 @@ inline void ConnectionResponseFrame::_internal_set_response(::location::nearby::
 
 // optional .location.nearby.connections.OsInfo os_info = 4;
 inline bool ConnectionResponseFrame::has_os_info() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000002U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000004U);
   PROTOBUF_ASSUME(!value || _impl_.os_info_ != nullptr);
   return value;
 }
@@ -13344,7 +13382,7 @@ inline void ConnectionResponseFrame::clear_os_info() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   if (_impl_.os_info_ != nullptr) _impl_.os_info_->Clear();
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000002U);
+                  0x00000004U);
 }
 inline const ::location::nearby::connections::OsInfo& ConnectionResponseFrame::_internal_os_info() const {
   ::google::protobuf::internal::TSanRead(&_impl_);
@@ -13363,16 +13401,16 @@ inline void ConnectionResponseFrame::unsafe_arena_set_allocated_os_info(
   }
   _impl_.os_info_ = reinterpret_cast<::location::nearby::connections::OsInfo*>(value);
   if (value != nullptr) {
-    SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+    SetHasBit(_impl_._has_bits_[0], 0x00000004U);
   } else {
-    ClearHasBit(_impl_._has_bits_[0], 0x00000002U);
+    ClearHasBit(_impl_._has_bits_[0], 0x00000004U);
   }
   // @@protoc_insertion_point(field_unsafe_arena_set_allocated:location.nearby.connections.ConnectionResponseFrame.os_info)
 }
 inline ::location::nearby::connections::OsInfo* PROTOBUF_NULLABLE ConnectionResponseFrame::release_os_info() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
 
-  ClearHasBit(_impl_._has_bits_[0], 0x00000002U);
+  ClearHasBit(_impl_._has_bits_[0], 0x00000004U);
   ::location::nearby::connections::OsInfo* released = _impl_.os_info_;
   _impl_.os_info_ = nullptr;
   if (::google::protobuf::internal::DebugHardenForceCopyInRelease()) {
@@ -13392,7 +13430,7 @@ inline ::location::nearby::connections::OsInfo* PROTOBUF_NULLABLE ConnectionResp
   ::google::protobuf::internal::TSanWrite(&_impl_);
   // @@protoc_insertion_point(field_release:location.nearby.connections.ConnectionResponseFrame.os_info)
 
-  ClearHasBit(_impl_._has_bits_[0], 0x00000002U);
+  ClearHasBit(_impl_._has_bits_[0], 0x00000004U);
   ::location::nearby::connections::OsInfo* temp = _impl_.os_info_;
   _impl_.os_info_ = nullptr;
   return temp;
@@ -13407,7 +13445,7 @@ inline ::location::nearby::connections::OsInfo* PROTOBUF_NONNULL ConnectionRespo
 }
 inline ::location::nearby::connections::OsInfo* PROTOBUF_NONNULL ConnectionResponseFrame::mutable_os_info()
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
-  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000004U);
   ::location::nearby::connections::OsInfo* _msg = _internal_mutable_os_info();
   // @@protoc_insertion_point(field_mutable:location.nearby.connections.ConnectionResponseFrame.os_info)
   return _msg;
@@ -13424,9 +13462,9 @@ inline void ConnectionResponseFrame::set_allocated_os_info(::location::nearby::c
     if (message_arena != submessage_arena) {
       value = ::google::protobuf::internal::GetOwnedMessage(message_arena, value, submessage_arena);
     }
-    SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+    SetHasBit(_impl_._has_bits_[0], 0x00000004U);
   } else {
-    ClearHasBit(_impl_._has_bits_[0], 0x00000002U);
+    ClearHasBit(_impl_._has_bits_[0], 0x00000004U);
   }
 
   _impl_.os_info_ = reinterpret_cast<::location::nearby::connections::OsInfo*>(value);
@@ -13435,14 +13473,14 @@ inline void ConnectionResponseFrame::set_allocated_os_info(::location::nearby::c
 
 // optional int32 multiplex_socket_bitmask = 5;
 inline bool ConnectionResponseFrame::has_multiplex_socket_bitmask() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000020U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000040U);
   return value;
 }
 inline void ConnectionResponseFrame::clear_multiplex_socket_bitmask() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.multiplex_socket_bitmask_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000020U);
+                  0x00000040U);
 }
 inline ::int32_t ConnectionResponseFrame::multiplex_socket_bitmask() const {
   // @@protoc_insertion_point(field_get:location.nearby.connections.ConnectionResponseFrame.multiplex_socket_bitmask)
@@ -13450,7 +13488,7 @@ inline ::int32_t ConnectionResponseFrame::multiplex_socket_bitmask() const {
 }
 inline void ConnectionResponseFrame::set_multiplex_socket_bitmask(::int32_t value) {
   _internal_set_multiplex_socket_bitmask(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000020U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000040U);
   // @@protoc_insertion_point(field_set:location.nearby.connections.ConnectionResponseFrame.multiplex_socket_bitmask)
 }
 inline ::int32_t ConnectionResponseFrame::_internal_multiplex_socket_bitmask() const {
@@ -13464,14 +13502,14 @@ inline void ConnectionResponseFrame::_internal_set_multiplex_socket_bitmask(::in
 
 // optional int32 nearby_connections_version = 6 [deprecated = true];
 inline bool ConnectionResponseFrame::has_nearby_connections_version() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000040U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000080U);
   return value;
 }
 inline void ConnectionResponseFrame::clear_nearby_connections_version() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.nearby_connections_version_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000040U);
+                  0x00000080U);
 }
 inline ::int32_t ConnectionResponseFrame::nearby_connections_version() const {
   // @@protoc_insertion_point(field_get:location.nearby.connections.ConnectionResponseFrame.nearby_connections_version)
@@ -13479,7 +13517,7 @@ inline ::int32_t ConnectionResponseFrame::nearby_connections_version() const {
 }
 inline void ConnectionResponseFrame::set_nearby_connections_version(::int32_t value) {
   _internal_set_nearby_connections_version(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000040U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000080U);
   // @@protoc_insertion_point(field_set:location.nearby.connections.ConnectionResponseFrame.nearby_connections_version)
 }
 inline ::int32_t ConnectionResponseFrame::_internal_nearby_connections_version() const {
@@ -13493,14 +13531,14 @@ inline void ConnectionResponseFrame::_internal_set_nearby_connections_version(::
 
 // optional int32 safe_to_disconnect_version = 7;
 inline bool ConnectionResponseFrame::has_safe_to_disconnect_version() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000080U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000100U);
   return value;
 }
 inline void ConnectionResponseFrame::clear_safe_to_disconnect_version() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.safe_to_disconnect_version_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000080U);
+                  0x00000100U);
 }
 inline ::int32_t ConnectionResponseFrame::safe_to_disconnect_version() const {
   // @@protoc_insertion_point(field_get:location.nearby.connections.ConnectionResponseFrame.safe_to_disconnect_version)
@@ -13508,7 +13546,7 @@ inline ::int32_t ConnectionResponseFrame::safe_to_disconnect_version() const {
 }
 inline void ConnectionResponseFrame::set_safe_to_disconnect_version(::int32_t value) {
   _internal_set_safe_to_disconnect_version(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000080U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000100U);
   // @@protoc_insertion_point(field_set:location.nearby.connections.ConnectionResponseFrame.safe_to_disconnect_version)
 }
 inline ::int32_t ConnectionResponseFrame::_internal_safe_to_disconnect_version() const {
@@ -13522,7 +13560,7 @@ inline void ConnectionResponseFrame::_internal_set_safe_to_disconnect_version(::
 
 // optional .location.nearby.connections.LocationHint location_hint = 8;
 inline bool ConnectionResponseFrame::has_location_hint() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000004U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000008U);
   PROTOBUF_ASSUME(!value || _impl_.location_hint_ != nullptr);
   return value;
 }
@@ -13530,7 +13568,7 @@ inline void ConnectionResponseFrame::clear_location_hint() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   if (_impl_.location_hint_ != nullptr) _impl_.location_hint_->Clear();
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000004U);
+                  0x00000008U);
 }
 inline const ::location::nearby::connections::LocationHint& ConnectionResponseFrame::_internal_location_hint() const {
   ::google::protobuf::internal::TSanRead(&_impl_);
@@ -13549,16 +13587,16 @@ inline void ConnectionResponseFrame::unsafe_arena_set_allocated_location_hint(
   }
   _impl_.location_hint_ = reinterpret_cast<::location::nearby::connections::LocationHint*>(value);
   if (value != nullptr) {
-    SetHasBit(_impl_._has_bits_[0], 0x00000004U);
+    SetHasBit(_impl_._has_bits_[0], 0x00000008U);
   } else {
-    ClearHasBit(_impl_._has_bits_[0], 0x00000004U);
+    ClearHasBit(_impl_._has_bits_[0], 0x00000008U);
   }
   // @@protoc_insertion_point(field_unsafe_arena_set_allocated:location.nearby.connections.ConnectionResponseFrame.location_hint)
 }
 inline ::location::nearby::connections::LocationHint* PROTOBUF_NULLABLE ConnectionResponseFrame::release_location_hint() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
 
-  ClearHasBit(_impl_._has_bits_[0], 0x00000004U);
+  ClearHasBit(_impl_._has_bits_[0], 0x00000008U);
   ::location::nearby::connections::LocationHint* released = _impl_.location_hint_;
   _impl_.location_hint_ = nullptr;
   if (::google::protobuf::internal::DebugHardenForceCopyInRelease()) {
@@ -13578,7 +13616,7 @@ inline ::location::nearby::connections::LocationHint* PROTOBUF_NULLABLE Connecti
   ::google::protobuf::internal::TSanWrite(&_impl_);
   // @@protoc_insertion_point(field_release:location.nearby.connections.ConnectionResponseFrame.location_hint)
 
-  ClearHasBit(_impl_._has_bits_[0], 0x00000004U);
+  ClearHasBit(_impl_._has_bits_[0], 0x00000008U);
   ::location::nearby::connections::LocationHint* temp = _impl_.location_hint_;
   _impl_.location_hint_ = nullptr;
   return temp;
@@ -13593,7 +13631,7 @@ inline ::location::nearby::connections::LocationHint* PROTOBUF_NONNULL Connectio
 }
 inline ::location::nearby::connections::LocationHint* PROTOBUF_NONNULL ConnectionResponseFrame::mutable_location_hint()
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
-  SetHasBit(_impl_._has_bits_[0], 0x00000004U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000008U);
   ::location::nearby::connections::LocationHint* _msg = _internal_mutable_location_hint();
   // @@protoc_insertion_point(field_mutable:location.nearby.connections.ConnectionResponseFrame.location_hint)
   return _msg;
@@ -13610,9 +13648,9 @@ inline void ConnectionResponseFrame::set_allocated_location_hint(::location::nea
     if (message_arena != submessage_arena) {
       value = ::google::protobuf::internal::GetOwnedMessage(message_arena, value, submessage_arena);
     }
-    SetHasBit(_impl_._has_bits_[0], 0x00000004U);
+    SetHasBit(_impl_._has_bits_[0], 0x00000008U);
   } else {
-    ClearHasBit(_impl_._has_bits_[0], 0x00000004U);
+    ClearHasBit(_impl_._has_bits_[0], 0x00000008U);
   }
 
   _impl_.location_hint_ = reinterpret_cast<::location::nearby::connections::LocationHint*>(value);
@@ -13621,14 +13659,14 @@ inline void ConnectionResponseFrame::set_allocated_location_hint(::location::nea
 
 // optional int32 keep_alive_timeout_millis = 9;
 inline bool ConnectionResponseFrame::has_keep_alive_timeout_millis() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000100U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000200U);
   return value;
 }
 inline void ConnectionResponseFrame::clear_keep_alive_timeout_millis() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.keep_alive_timeout_millis_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000100U);
+                  0x00000200U);
 }
 inline ::int32_t ConnectionResponseFrame::keep_alive_timeout_millis() const {
   // @@protoc_insertion_point(field_get:location.nearby.connections.ConnectionResponseFrame.keep_alive_timeout_millis)
@@ -13636,7 +13674,7 @@ inline ::int32_t ConnectionResponseFrame::keep_alive_timeout_millis() const {
 }
 inline void ConnectionResponseFrame::set_keep_alive_timeout_millis(::int32_t value) {
   _internal_set_keep_alive_timeout_millis(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000100U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000200U);
   // @@protoc_insertion_point(field_set:location.nearby.connections.ConnectionResponseFrame.keep_alive_timeout_millis)
 }
 inline ::int32_t ConnectionResponseFrame::_internal_keep_alive_timeout_millis() const {
@@ -13646,6 +13684,75 @@ inline ::int32_t ConnectionResponseFrame::_internal_keep_alive_timeout_millis() 
 inline void ConnectionResponseFrame::_internal_set_keep_alive_timeout_millis(::int32_t value) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.keep_alive_timeout_millis_ = value;
+}
+
+// optional string wifi_direct_device_name = 10;
+inline bool ConnectionResponseFrame::has_wifi_direct_device_name() const {
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000002U);
+  return value;
+}
+inline void ConnectionResponseFrame::clear_wifi_direct_device_name() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.wifi_direct_device_name_.ClearToEmpty();
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00000002U);
+}
+inline const ::std::string& ConnectionResponseFrame::wifi_direct_device_name() const
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_get:location.nearby.connections.ConnectionResponseFrame.wifi_direct_device_name)
+  return _internal_wifi_direct_device_name();
+}
+template <typename Arg_, typename... Args_>
+PROTOBUF_ALWAYS_INLINE void ConnectionResponseFrame::set_wifi_direct_device_name(Arg_&& arg, Args_... args) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  _impl_.wifi_direct_device_name_.Set(static_cast<Arg_&&>(arg), args..., GetArena());
+  // @@protoc_insertion_point(field_set:location.nearby.connections.ConnectionResponseFrame.wifi_direct_device_name)
+}
+inline ::std::string* PROTOBUF_NONNULL ConnectionResponseFrame::mutable_wifi_direct_device_name()
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  ::std::string* _s = _internal_mutable_wifi_direct_device_name();
+  // @@protoc_insertion_point(field_mutable:location.nearby.connections.ConnectionResponseFrame.wifi_direct_device_name)
+  return _s;
+}
+inline const ::std::string& ConnectionResponseFrame::_internal_wifi_direct_device_name() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.wifi_direct_device_name_.Get();
+}
+inline void ConnectionResponseFrame::_internal_set_wifi_direct_device_name(const ::std::string& value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.wifi_direct_device_name_.Set(value, GetArena());
+}
+inline ::std::string* PROTOBUF_NONNULL ConnectionResponseFrame::_internal_mutable_wifi_direct_device_name() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  return _impl_.wifi_direct_device_name_.Mutable( GetArena());
+}
+inline ::std::string* PROTOBUF_NULLABLE ConnectionResponseFrame::release_wifi_direct_device_name() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  // @@protoc_insertion_point(field_release:location.nearby.connections.ConnectionResponseFrame.wifi_direct_device_name)
+  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000002U)) {
+    return nullptr;
+  }
+  ClearHasBit(_impl_._has_bits_[0], 0x00000002U);
+  auto* released = _impl_.wifi_direct_device_name_.Release();
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString()) {
+    _impl_.wifi_direct_device_name_.Set("", GetArena());
+  }
+  return released;
+}
+inline void ConnectionResponseFrame::set_allocated_wifi_direct_device_name(::std::string* PROTOBUF_NULLABLE value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  if (value != nullptr) {
+    SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  } else {
+    ClearHasBit(_impl_._has_bits_[0], 0x00000002U);
+  }
+  _impl_.wifi_direct_device_name_.SetAllocated(value, GetArena());
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString() && _impl_.wifi_direct_device_name_.IsDefault()) {
+    _impl_.wifi_direct_device_name_.Set("", GetArena());
+  }
+  // @@protoc_insertion_point(field_set_allocated:location.nearby.connections.ConnectionResponseFrame.wifi_direct_device_name)
 }
 
 // -------------------------------------------------------------------
@@ -15574,14 +15681,14 @@ inline void BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentia
 
 // optional int32 port = 3;
 inline bool BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::has_port() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000040U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000080U);
   return value;
 }
 inline void BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::clear_port() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.port_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000040U);
+                  0x00000080U);
 }
 inline ::int32_t BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::port() const {
   // @@protoc_insertion_point(field_get:location.nearby.connections.BandwidthUpgradeNegotiationFrame.UpgradePathInfo.WifiDirectCredentials.port)
@@ -15589,7 +15696,7 @@ inline ::int32_t BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCred
 }
 inline void BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::set_port(::int32_t value) {
   _internal_set_port(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000040U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000080U);
   // @@protoc_insertion_point(field_set:location.nearby.connections.BandwidthUpgradeNegotiationFrame.UpgradePathInfo.WifiDirectCredentials.port)
 }
 inline ::int32_t BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::_internal_port() const {
@@ -15603,14 +15710,14 @@ inline void BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentia
 
 // optional int32 frequency = 4;
 inline bool BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::has_frequency() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000080U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000100U);
   return value;
 }
 inline void BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::clear_frequency() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.frequency_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000080U);
+                  0x00000100U);
 }
 inline ::int32_t BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::frequency() const {
   // @@protoc_insertion_point(field_get:location.nearby.connections.BandwidthUpgradeNegotiationFrame.UpgradePathInfo.WifiDirectCredentials.frequency)
@@ -15618,7 +15725,7 @@ inline ::int32_t BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCred
 }
 inline void BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::set_frequency(::int32_t value) {
   _internal_set_frequency(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000080U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000100U);
   // @@protoc_insertion_point(field_set:location.nearby.connections.BandwidthUpgradeNegotiationFrame.UpgradePathInfo.WifiDirectCredentials.frequency)
 }
 inline ::int32_t BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::_internal_frequency() const {
@@ -15764,7 +15871,7 @@ inline void BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentia
   // @@protoc_insertion_point(field_set_allocated:location.nearby.connections.BandwidthUpgradeNegotiationFrame.UpgradePathInfo.WifiDirectCredentials.ip_v6_address)
 }
 
-// optional string service_name = 7;
+// optional string service_name = 7 [deprecated = true];
 inline bool BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::has_service_name() const {
   bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000010U);
   return value;
@@ -15831,6 +15938,75 @@ inline void BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentia
     _impl_.service_name_.Set("", GetArena());
   }
   // @@protoc_insertion_point(field_set_allocated:location.nearby.connections.BandwidthUpgradeNegotiationFrame.UpgradePathInfo.WifiDirectCredentials.service_name)
+}
+
+// optional string device_name = 9;
+inline bool BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::has_device_name() const {
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000040U);
+  return value;
+}
+inline void BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::clear_device_name() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.device_name_.ClearToEmpty();
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00000040U);
+}
+inline const ::std::string& BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::device_name() const
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_get:location.nearby.connections.BandwidthUpgradeNegotiationFrame.UpgradePathInfo.WifiDirectCredentials.device_name)
+  return _internal_device_name();
+}
+template <typename Arg_, typename... Args_>
+PROTOBUF_ALWAYS_INLINE void BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::set_device_name(Arg_&& arg, Args_... args) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  SetHasBit(_impl_._has_bits_[0], 0x00000040U);
+  _impl_.device_name_.Set(static_cast<Arg_&&>(arg), args..., GetArena());
+  // @@protoc_insertion_point(field_set:location.nearby.connections.BandwidthUpgradeNegotiationFrame.UpgradePathInfo.WifiDirectCredentials.device_name)
+}
+inline ::std::string* PROTOBUF_NONNULL BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::mutable_device_name()
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  SetHasBit(_impl_._has_bits_[0], 0x00000040U);
+  ::std::string* _s = _internal_mutable_device_name();
+  // @@protoc_insertion_point(field_mutable:location.nearby.connections.BandwidthUpgradeNegotiationFrame.UpgradePathInfo.WifiDirectCredentials.device_name)
+  return _s;
+}
+inline const ::std::string& BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::_internal_device_name() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.device_name_.Get();
+}
+inline void BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::_internal_set_device_name(const ::std::string& value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.device_name_.Set(value, GetArena());
+}
+inline ::std::string* PROTOBUF_NONNULL BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::_internal_mutable_device_name() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  return _impl_.device_name_.Mutable( GetArena());
+}
+inline ::std::string* PROTOBUF_NULLABLE BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::release_device_name() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  // @@protoc_insertion_point(field_release:location.nearby.connections.BandwidthUpgradeNegotiationFrame.UpgradePathInfo.WifiDirectCredentials.device_name)
+  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000040U)) {
+    return nullptr;
+  }
+  ClearHasBit(_impl_._has_bits_[0], 0x00000040U);
+  auto* released = _impl_.device_name_.Release();
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString()) {
+    _impl_.device_name_.Set("", GetArena());
+  }
+  return released;
+}
+inline void BandwidthUpgradeNegotiationFrame_UpgradePathInfo_WifiDirectCredentials::set_allocated_device_name(::std::string* PROTOBUF_NULLABLE value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  if (value != nullptr) {
+    SetHasBit(_impl_._has_bits_[0], 0x00000040U);
+  } else {
+    ClearHasBit(_impl_._has_bits_[0], 0x00000040U);
+  }
+  _impl_.device_name_.SetAllocated(value, GetArena());
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString() && _impl_.device_name_.IsDefault()) {
+    _impl_.device_name_.Set("", GetArena());
+  }
+  // @@protoc_insertion_point(field_set_allocated:location.nearby.connections.BandwidthUpgradeNegotiationFrame.UpgradePathInfo.WifiDirectCredentials.device_name)
 }
 
 // optional string pin = 8;

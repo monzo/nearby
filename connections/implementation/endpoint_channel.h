@@ -26,8 +26,7 @@
 #include "internal/platform/byte_array.h"
 #include "internal/platform/exception.h"
 
-namespace nearby {
-namespace connections {
+namespace nearby::connections {
 
 class EndpointChannel {
  public:
@@ -51,8 +50,7 @@ class EndpointChannel {
   // and safe disconnection result.
   virtual void Close(
       location::nearby::proto::connections::DisconnectionReason reason,
-      location::nearby::analytics::proto::ConnectionsLog::
-          EstablishedConnection::SafeDisconnectionResult result) = 0;
+      nearby::analytics::SafeDisconnectionResult result) = 0;
 
   // True if the EndpointChannel is currently closed.
   virtual bool IsClosed() const = 0;
@@ -130,6 +128,9 @@ class EndpointChannel {
 
   // Enables the multiplex socket on the EndpointChannel.
   virtual bool EnableMultiplexSocket() { return false; }
+
+  virtual void SetLocalEndpointId(const std::string& local_endpoint_id) = 0;
+  virtual std::string GetLocalEndpointId() const = 0;
 };
 
 inline bool operator==(const EndpointChannel& lhs, const EndpointChannel& rhs) {
@@ -141,7 +142,6 @@ inline bool operator!=(const EndpointChannel& lhs, const EndpointChannel& rhs) {
   return !(lhs == rhs);
 }
 
-}  // namespace connections
-}  // namespace nearby
+}  // namespace nearby::connections
 
 #endif  // CORE_INTERNAL_ENDPOINT_CHANNEL_H_

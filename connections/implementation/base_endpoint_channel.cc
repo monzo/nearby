@@ -40,15 +40,13 @@
 #include "internal/platform/mutex_lock.h"
 #include "internal/platform/output_stream.h"
 
-namespace nearby {
-namespace connections {
+namespace nearby::connections {
 
 namespace {
-using ::location::nearby::analytics::proto::ConnectionsLog;
 using ::location::nearby::proto::connections::Medium::BLE;
 using ::location::nearby::proto::connections::Medium::BLE_L2CAP;
-using DisconnectionReason =
-    ::location::nearby::proto::connections::DisconnectionReason;
+using ::nearby::analytics::SafeDisconnectionResult;
+using ::location::nearby::proto::connections::DisconnectionReason;
 
 Exception WriteInt(OutputStream* writer, std::int32_t value) {
   return Base64Utils::WriteInt(writer, value);
@@ -304,7 +302,7 @@ void BaseEndpointChannel::SetAnalyticsRecorder(
 
 void BaseEndpointChannel::Close(
     location::nearby::proto::connections::DisconnectionReason reason) {
-  Close(reason, ConnectionsLog::EstablishedConnection::SAFE_DISCONNECTION);
+  Close(reason, SafeDisconnectionResult::kSafeDisconnection);
 }
 
 void BaseEndpointChannel::Close(
@@ -420,6 +418,15 @@ int BaseEndpointChannel::GetFrequency() const { return frequency_; }
 // Returns the try count of this EndpointChannel.
 int BaseEndpointChannel::GetTryCount() const { return try_count_; }
 
+void BaseEndpointChannel::SetLocalEndpointId(
+    const std::string& local_endpoint_id) {
+  local_endpoint_id_ = local_endpoint_id;
+}
+
+std::string BaseEndpointChannel::GetLocalEndpointId() const {
+  return local_endpoint_id_;
+}
+
 int BaseEndpointChannel::GetMaxAllowedReadBytes() const {
   int64_t max_allowed_read_bytes = NearbyFlags::GetInstance().GetInt64Flag(
       config_package_nearby::nearby_connections_feature::
@@ -468,5 +475,4 @@ std::unique_ptr<std::string> BaseEndpointChannel::EncodeMessageForTests(
   return crypto_context_->EncodeMessageToPeer(data);
 }
 
-}  // namespace connections
-}  // namespace nearby
+}  // namespace nearby::connections

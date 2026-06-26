@@ -233,21 +233,15 @@ cc_library(
 )
 
 cc_library(
-    name = "webrtc",
-    srcs = ["webrtc.cc"],
-    hdrs = ["webrtc.h"],
+    name = "webrtc_platform",
+    srcs = ["webrtc_platform.cc"],
     tags = ["windows"],
     deps = [
+        "//connections/implementation/mediums/webrtc:webrtc_medium_impl",
         "//internal/platform:logging",
-        "//internal/platform:tachyon_express_signaling_messenger",
-        "//internal/platform/implementation:comm",
-        # "//third_party/webrtc/files/stable/webrtc/api:create_modular_peer_connection_factory",
-        # "//third_party/webrtc/files/stable/webrtc/api:peer_connection_interface",
-        # "//third_party/webrtc/files/stable/webrtc/api:rtc_error",
-        # "//third_party/webrtc/files/stable/webrtc/api:scoped_refptr",
-        "//third_party/webrtc/files/stable/webrtc/rtc_base:threading",
-        "@com_google_absl//absl/strings",
+        "//internal/platform/implementation:webrtc_platform",
     ],
+    alwayslink = True,
 )
 
 cc_library(
@@ -321,6 +315,9 @@ cc_library(
         "-DNO_INTEL_PIE",
         "-D_WIN32_WINNT=_WIN32_WINNT_WIN10 -DWINVER=_WIN32_WINNT_WIN10",
     ],
+    linkopts = [
+        "iphlpapi.lib",
+    ],
     tags = ["windows"],
     visibility = [
         "//chrome/chromeos/assistant/data_migration/lib:__pkg__",
@@ -363,12 +360,6 @@ cc_library(
         "//internal/platform/implementation/shared:count_down_latch",
         "//internal/platform/implementation/windows/generated:types",
         "//third_party/intel/pie",
-        # "//third_party/webrtc/files/stable/webrtc/api:create_modular_peer_connection_factory",
-        # "//third_party/webrtc/files/stable/webrtc/api:data_channel_interface",
-        # "//third_party/webrtc/files/stable/webrtc/api:peer_connection_interface",
-        # "//third_party/webrtc/files/stable/webrtc/api:rtc_error",
-        # "//third_party/webrtc/files/stable/webrtc/api:scoped_refptr",
-        "//third_party/webrtc/files/stable/webrtc/rtc_base:threading",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -380,7 +371,6 @@ cc_library(
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
-        "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:span",
         "@com_google_protobuf//:protobuf",
         "@com_google_protobuf//json",
@@ -438,23 +428,6 @@ cc_proto_library(
     testonly = True,
     compatible_with = ["//buildenv/target:non_prod"],
     deps = [":preferences_manager_test_proto"],
-)
-
-cc_test(
-    name = "webrtc_test",
-    size = "small",
-    srcs = ["webrtc_test.cc"],
-    deps = [
-        ":webrtc",
-        "//internal/platform/implementation:comm",
-        "//internal/platform/implementation:platform_impl",
-        # "//third_party/webrtc/files/stable/webrtc/api:data_channel_interface",
-        # "//third_party/webrtc/files/stable/webrtc/api:jsep",
-        # "//third_party/webrtc/files/stable/webrtc/api:peer_connection_interface",
-        # "//third_party/webrtc/files/stable/webrtc/api:scoped_refptr",
-        "@com_github_protobuf_matchers//protobuf-matchers",
-        "@com_google_googletest//:gtest_main",
-    ],
 )
 
 cc_test(

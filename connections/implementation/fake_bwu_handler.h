@@ -89,6 +89,7 @@ class FakeBwuHandler : public BaseBwuHandler {
     upgraded_channel->set_read_output(
         ExceptionOr<ByteArray>(ByteArray(parser::ForBwuIntroduction(
             *handle_initialize_calls_[initialize_call_index].endpoint_id,
+            /*last_endpoint_id=*/"",
             false /* supports_disabling_encryption */))));
     auto connection = std::make_unique<IncomingSocketConnection>();
     connection->channel = std::move(upgraded_channel);
@@ -178,7 +179,7 @@ class FakeBwuHandler : public BaseBwuHandler {
         return parser::ForBwuWifiDirectPathAvailable(
             /*ssid=*/"", /*password=*/"", /*port=*/2143,
             /*frequency=*/2412, /*supports_disabling_encryption=*/false,
-            /*gateway=*/"123.234.23.1", /*service_name=*/"NC-WifiDirectTest",
+            /*gateway=*/"123.234.23.1", /*device_name=*/"NC-WifiDirectTest",
             /*pin=*/"b592f7d3");
       case location::nearby::proto::connections::UNKNOWN_MEDIUM:
       case location::nearby::proto::connections::MDNS:

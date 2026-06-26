@@ -24,26 +24,26 @@
 #include <utility>
 #include <vector>
 
+#include "location/nearby/analytics/cpp/logging/mock_event_logger.h"
+#include "location/nearby/analytics/cpp/logging/sharing_log_matchers.h"
+#include "location/nearby/analytics/cpp/proto/nearby_sharing_log.pb.h"
+#include "location/nearby/sharing/lib/analytics/analytics_recorder_impl.h"
 #include "gmock/gmock.h"
 #include "protobuf-matchers/protocol-buffer-matchers.h"
 #include "gtest/gtest.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
-#include "internal/analytics/mock_event_logger.h"
-#include "internal/analytics/sharing_log_matchers.h"
 #include "internal/base/file_path.h"
 #include "internal/test/fake_clock.h"
 #include "internal/test/fake_device_info.h"
 #include "internal/test/fake_task_runner.h"
 #include "proto/sharing_enums.pb.h"
-#include "sharing/analytics/analytics_recorder.h"
 #include "sharing/attachment_compare.h"  // IWYU pragma: keep
 #include "sharing/fake_nearby_connections_manager.h"
 #include "sharing/file_attachment.h"
 #include "sharing/internal/public/logging.h"
 #include "sharing/nearby_connection_impl.h"
 #include "sharing/nearby_connections_types.h"
-#include "sharing/proto/analytics/nearby_sharing_log.pb.h"
 #include "sharing/proto/wire_format.pb.h"
 #include "sharing/share_session_usage.h"
 #include "sharing/share_target.h"
@@ -186,8 +186,8 @@ class IncomingShareSessionTest : public ::testing::Test {
   FakeClock clock_;
   FakeTaskRunner task_runner_{&clock_, 1};
   nearby::analytics::MockEventLogger mock_event_logger_;
-  analytics::AnalyticsRecorder analytics_recorder_{/*vendor_id=*/0,
-                                                   &mock_event_logger_};
+  analytics::AnalyticsRecorderImpl analytics_recorder_{/*vendor_id=*/0,
+                                                       &mock_event_logger_};
   ShareTarget share_target_;
   MockFunction<void(const IncomingShareSession&, const TransferMetadata&)>
       transfer_metadata_callback_;
